@@ -47,6 +47,16 @@
         <label for="reason">Wofür?</label>
         <input type="text" id="reason" placeholder="z.B. Pizza, Konzertticket..." />
 
+        <label>Beleg (optional)</label>
+        <div class="receipt-picker">
+          <button type="button" class="secondary" id="add-photo-btn">📎 Foto hinzufügen</button>
+        </div>
+        <input type="file" id="file-input" accept="image/*" class="hidden" />
+        <div id="receipt-preview-wrap" class="receipt-preview-wrap hidden">
+          <img id="receipt-preview" class="receipt-preview" alt="Beleg-Vorschau" />
+          <button type="button" class="secondary" id="remove-photo-btn">Entfernen</button>
+        </div>
+
         <div class="btn-row">
           <button type="submit">Hinzufügen</button>
         </div>
@@ -60,15 +70,31 @@
     </div>
   </div>
 
+  <div id="detail-overlay" class="overlay hidden">
+    <div class="overlay-card card">
+      <button type="button" class="secondary overlay-close" id="detail-close-btn">✕</button>
+      <h3 id="detail-name" style="margin-top:0"></h3>
+      <div id="detail-amount" class="detail-amount"></div>
+      <div id="detail-reason" class="detail-reason"></div>
+      <div id="detail-status" class="detail-status"></div>
+      <div id="detail-receipt-wrap" class="hidden">
+        <label>Beleg</label>
+        <img id="detail-receipt-img" class="receipt-preview" alt="Beleg" />
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
   <script src="/assets/js/appwrite-config.js"></script>
   <script src="/assets/js/auth.js"></script>
   <script>
     const DATABASE_ID = "main";
     const TABLE_ID = "debts";
+    const RECEIPTS_BUCKET_ID = "receipts";
 
     let currentUser = null;
     let debts = [];
+    let selectedReceiptFile = null;
 
     const fmt = (n) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
@@ -107,13 +133,15 @@
 
         const item = document.createElement("div");
         item.className = "debt-item" + (debt.settled ? " settled" : "");
+        item.dataset.id = debt.$id;
 
         const sign = debt.direction === "owed_to_me" ? "+" : "−";
         const colorClass = debt.direction === "owed_to_me" ? "owed-to-me" : "i-owe";
+        const receiptBadge = debt.receiptFileId ? '<span class="receipt-badge">📎</span>' : "";
 
         item.innerHTML = `
           <div class="debt-info">
-            <div class="name">${escapeHtml(debt.person)}</div>
+            <div class="name">${escapeHtml(debt.person)} ${receiptBadge}</div>
             <div class="reason">${escapeHtml(debt.reason || "")}</div>
           </div>
           <div class="debt-amount ${colorClass}">${sign} ${fmt(debt.amount)}</div>
@@ -128,11 +156,14 @@
       document.getElementById("total-owed-to-me").textContent = fmt(owedToMe);
       document.getElementById("total-i-owe").textContent = fmt(iOwe);
 
+      list.querySelectorAll(".debt-info").forEach((el) => {
+        el.addEventListener("click", () => openDetail(el.closest(".debt-item").dataset.id));
+      });
       list.querySelectorAll(".settle-btn").forEach((btn) => {
-        btn.addEventListener("click", () => toggleSettled(btn.dataset.id));
+        btn.addEventListener("click", (e) => { e.stopPropagation(); toggleSettled(btn.dataset.id); });
       });
       list.querySelectorAll(".delete-btn").forEach((btn) => {
-        btn.addEventListener("click", () => deleteDebt(btn.dataset.id));
+        btn.addEventListener("click", (e) => { e.stopPropagation(); deleteDebt(btn.dataset.id); });
       });
     }
 
@@ -155,9 +186,33 @@
 
     async function deleteDebt(id) {
       if (!confirm("Diesen Eintrag wirklich löschen?")) return;
+      const debt = debts.find((d) => d.$id === id);
+      if (debt && debt.receiptFileId) {
+        await storage.deleteFile({ bucketId: RECEIPTS_BUCKET_ID, fileId: debt.receiptFileId }).catch(() => {});
+      }
       await tablesDB.deleteRow({ databaseId: DATABASE_ID, tableId: TABLE_ID, rowId: id });
       await loadDebts();
     }
+
+    const fileInput = document.getElementById("file-input");
+    const previewWrap = document.getElementById("receipt-preview-wrap");
+    const previewImg = document.getElementById("receipt-preview");
+
+    document.getElementById("add-photo-btn").addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      selectedReceiptFile = file;
+      previewImg.src = URL.createObjectURL(file);
+      previewWrap.classList.remove("hidden");
+    });
+
+    document.getElementById("remove-photo-btn").addEventListener("click", () => {
+      selectedReceiptFile = null;
+      fileInput.value = "";
+      previewWrap.classList.add("hidden");
+    });
 
     document.getElementById("debt-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -169,23 +224,73 @@
       const amount = parseFloat(document.getElementById("amount").value);
       const reason = document.getElementById("reason").value.trim();
 
+      const ownerPermissions = [
+        Appwrite.Permission.read(Appwrite.Role.user(currentUser.$id)),
+        Appwrite.Permission.update(Appwrite.Role.user(currentUser.$id)),
+        Appwrite.Permission.delete(Appwrite.Role.user(currentUser.$id)),
+      ];
+
       try {
+        let receiptFileId = null;
+        if (selectedReceiptFile) {
+          const uploaded = await storage.createFile({
+            bucketId: RECEIPTS_BUCKET_ID,
+            fileId: Appwrite.ID.unique(),
+            file: selectedReceiptFile,
+            permissions: ownerPermissions,
+          });
+          receiptFileId = uploaded.$id;
+        }
+
         await tablesDB.createRow({
           databaseId: DATABASE_ID,
           tableId: TABLE_ID,
           rowId: Appwrite.ID.unique(),
-          data: { person, amount, reason, direction, settled: false },
-          permissions: [
-            Appwrite.Permission.read(Appwrite.Role.user(currentUser.$id)),
-            Appwrite.Permission.update(Appwrite.Role.user(currentUser.$id)),
-            Appwrite.Permission.delete(Appwrite.Role.user(currentUser.$id)),
-          ],
+          data: { person, amount, reason, direction, settled: false, receiptFileId },
+          permissions: ownerPermissions,
         });
         e.target.reset();
+        selectedReceiptFile = null;
+        previewWrap.classList.add("hidden");
         await loadDebts();
       } catch (err) {
         errorMsg.textContent = err.message || "Speichern fehlgeschlagen.";
       }
+    });
+
+    function openDetail(id) {
+      const debt = debts.find((d) => d.$id === id);
+      if (!debt) return;
+
+      const sign = debt.direction === "owed_to_me" ? "+" : "−";
+      const colorClass = debt.direction === "owed_to_me" ? "owed-to-me" : "i-owe";
+
+      document.getElementById("detail-name").textContent = debt.person;
+      const amountEl = document.getElementById("detail-amount");
+      amountEl.textContent = `${sign} ${fmt(debt.amount)}`;
+      amountEl.className = `detail-amount ${colorClass}`;
+      document.getElementById("detail-reason").textContent = debt.reason || "";
+      document.getElementById("detail-status").textContent = debt.settled ? "Beglichen" : "Offen";
+
+      const receiptWrap = document.getElementById("detail-receipt-wrap");
+      if (debt.receiptFileId) {
+        const url = storage.getFileView({ bucketId: RECEIPTS_BUCKET_ID, fileId: debt.receiptFileId });
+        document.getElementById("detail-receipt-img").src = url;
+        receiptWrap.classList.remove("hidden");
+      } else {
+        receiptWrap.classList.add("hidden");
+      }
+
+      document.getElementById("detail-overlay").classList.remove("hidden");
+    }
+
+    function closeDetail() {
+      document.getElementById("detail-overlay").classList.add("hidden");
+    }
+
+    document.getElementById("detail-close-btn").addEventListener("click", closeDetail);
+    document.getElementById("detail-overlay").addEventListener("click", (e) => {
+      if (e.target.id === "detail-overlay") closeDetail();
     });
 
     document.getElementById("logout-btn").addEventListener("click", logout);

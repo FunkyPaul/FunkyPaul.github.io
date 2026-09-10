@@ -11,3 +11,4 @@ const client = new Appwrite.Client()
 
 const account = new Appwrite.Account(client);
 const tablesDB = new Appwrite.TablesDB(client);
+const storage = new Appwrite.Storage(client);
