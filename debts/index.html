@@ -66,6 +66,30 @@
 
     <div class="card">
       <h3 style="margin-top:0">Übersicht</h3>
+
+      <div class="filter-bar">
+        <input type="text" id="filter-person" placeholder="Nach Person suchen..." />
+        <div class="filter-row">
+          <div>
+            <label for="filter-min">Betrag min (€)</label>
+            <input type="number" id="filter-min" step="0.01" min="0" placeholder="0" />
+          </div>
+          <div>
+            <label for="filter-max">Betrag max (€)</label>
+            <input type="number" id="filter-max" step="0.01" min="0" placeholder="∞" />
+          </div>
+        </div>
+        <label for="filter-receipt">Beleg</label>
+        <select id="filter-receipt">
+          <option value="all">Alle</option>
+          <option value="with">Nur mit Beleg</option>
+          <option value="without">Nur ohne Beleg</option>
+        </select>
+        <div class="btn-row">
+          <button type="button" class="secondary" id="filter-reset-btn">Filter zurücksetzen</button>
+        </div>
+      </div>
+
       <div id="debt-list"></div>
     </div>
   </div>
@@ -114,18 +138,38 @@
       render();
     }
 
+    function getFilteredDebts() {
+      const personQuery = document.getElementById("filter-person").value.trim().toLowerCase();
+      const min = parseFloat(document.getElementById("filter-min").value);
+      const max = parseFloat(document.getElementById("filter-max").value);
+      const receiptFilter = document.getElementById("filter-receipt").value;
+
+      return debts.filter((debt) => {
+        if (personQuery && !debt.person.toLowerCase().includes(personQuery)) return false;
+        if (!isNaN(min) && debt.amount < min) return false;
+        if (!isNaN(max) && debt.amount > max) return false;
+        if (receiptFilter === "with" && !debt.receiptFileId) return false;
+        if (receiptFilter === "without" && debt.receiptFileId) return false;
+        return true;
+      });
+    }
+
     function render() {
       const list = document.getElementById("debt-list");
       list.innerHTML = "";
 
+      const filteredDebts = getFilteredDebts();
+
       if (debts.length === 0) {
         list.innerHTML = '<div class="empty-state">Noch keine Einträge.</div>';
+      } else if (filteredDebts.length === 0) {
+        list.innerHTML = '<div class="empty-state">Keine Einträge passen zu diesem Filter.</div>';
       }
 
       let owedToMe = 0;
       let iOwe = 0;
 
-      for (const debt of debts) {
+      for (const debt of filteredDebts) {
         if (!debt.settled) {
           if (debt.direction === "owed_to_me") owedToMe += debt.amount;
           else iOwe += debt.amount;
@@ -294,6 +338,18 @@
     });
 
     document.getElementById("logout-btn").addEventListener("click", logout);
+
+    ["filter-person", "filter-min", "filter-max", "filter-receipt"].forEach((id) => {
+      document.getElementById(id).addEventListener("input", render);
+    });
+
+    document.getElementById("filter-reset-btn").addEventListener("click", () => {
+      document.getElementById("filter-person").value = "";
+      document.getElementById("filter-min").value = "";
+      document.getElementById("filter-max").value = "";
+      document.getElementById("filter-receipt").value = "all";
+      render();
+    });
 
     init();
   </script>

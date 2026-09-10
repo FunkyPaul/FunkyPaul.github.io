@@ -233,6 +233,33 @@ button.danger:hover {
   padding: 40px 0;
 }
 
+.filter-bar {
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-bar label {
+  margin-top: 10px;
+}
+
+.filter-row {
+  display: flex;
+  gap: 12px;
+}
+
+.filter-row > div {
+  flex: 1;
+}
+
+.filter-bar .btn-row {
+  margin-top: 12px;
+}
+
+.filter-bar .btn-row button {
+  width: 100%;
+}
+
 .direction-toggle {
   display: flex;
   gap: 8px;
