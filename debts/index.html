@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Schuldentracker – paulfunke.me</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <h1>Schuldentracker</h1>
+      <button class="secondary" id="logout-btn">Logout</button>
+    </header>
+
+    <div class="summary">
+      <div class="card">
+        <div class="value owed-to-me" id="total-owed-to-me">0,00 €</div>
+        <div>bekomme ich</div>
+      </div>
+      <div class="card">
+        <div class="value i-owe" id="total-i-owe">0,00 €</div>
+        <div>schulde ich</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Neuer Eintrag</h3>
+      <form id="debt-form">
+        <div class="direction-toggle">
+          <label>
+            <input type="radio" name="direction" value="owed_to_me" checked />
+            Person schuldet mir
+          </label>
+          <label>
+            <input type="radio" name="direction" value="i_owe" />
+            Ich schulde Person
+          </label>
+        </div>
+
+        <label for="person">Name der Person</label>
+        <input type="text" id="person" required />
+
+        <label for="amount">Betrag (€)</label>
+        <input type="number" id="amount" step="0.01" min="0.01" required />
+
+        <label for="reason">Wofür?</label>
+        <input type="text" id="reason" placeholder="z.B. Pizza, Konzertticket..." />
+
+        <div class="btn-row">
+          <button type="submit">Hinzufügen</button>
+        </div>
+        <div class="error-msg" id="error-msg"></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Übersicht</h3>
+      <div id="debt-list"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script>
+    const DATABASE_ID = "main";
+    const TABLE_ID = "debts";
+
+    let currentUser = null;
+    let debts = [];
+
+    const fmt = (n) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+
+    async function init() {
+      currentUser = await requireLogin("/login/?redirect=/debts/");
+      if (!currentUser) return;
+      await loadDebts();
+    }
+
+    async function loadDebts() {
+      const res = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        queries: [Appwrite.Query.orderDesc("$createdAt"), Appwrite.Query.limit(100)],
+      });
+      debts = res.rows;
+      render();
+    }
+
+    function render() {
+      const list = document.getElementById("debt-list");
+      list.innerHTML = "";
+
+      if (debts.length === 0) {
+        list.innerHTML = '<div class="empty-state">Noch keine Einträge.</div>';
+      }
+
+      let owedToMe = 0;
+      let iOwe = 0;
+
+      for (const debt of debts) {
+        if (!debt.settled) {
+          if (debt.direction === "owed_to_me") owedToMe += debt.amount;
+          else iOwe += debt.amount;
+        }
+
+        const item = document.createElement("div");
+        item.className = "debt-item" + (debt.settled ? " settled" : "");
+
+        const sign = debt.direction === "owed_to_me" ? "+" : "−";
+        const colorClass = debt.direction === "owed_to_me" ? "owed-to-me" : "i-owe";
+
+        item.innerHTML = `
+          <div class="debt-info">
+            <div class="name">${escapeHtml(debt.person)}</div>
+            <div class="reason">${escapeHtml(debt.reason || "")}</div>
+          </div>
+          <div class="debt-amount ${colorClass}">${sign} ${fmt(debt.amount)}</div>
+          <div class="debt-actions">
+            <button class="secondary settle-btn" data-id="${debt.$id}">${debt.settled ? "Zurück" : "Beglichen"}</button>
+            <button class="danger delete-btn" data-id="${debt.$id}">✕</button>
+          </div>
+        `;
+        list.appendChild(item);
+      }
+
+      document.getElementById("total-owed-to-me").textContent = fmt(owedToMe);
+      document.getElementById("total-i-owe").textContent = fmt(iOwe);
+
+      list.querySelectorAll(".settle-btn").forEach((btn) => {
+        btn.addEventListener("click", () => toggleSettled(btn.dataset.id));
+      });
+      list.querySelectorAll(".delete-btn").forEach((btn) => {
+        btn.addEventListener("click", () => deleteDebt(btn.dataset.id));
+      });
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    async function toggleSettled(id) {
+      const debt = debts.find((d) => d.$id === id);
+      await tablesDB.updateRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        rowId: id,
+        data: { settled: !debt.settled },
+      });
+      await loadDebts();
+    }
+
+    async function deleteDebt(id) {
+      if (!confirm("Diesen Eintrag wirklich löschen?")) return;
+      await tablesDB.deleteRow({ databaseId: DATABASE_ID, tableId: TABLE_ID, rowId: id });
+      await loadDebts();
+    }
+
+    document.getElementById("debt-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("error-msg");
+      errorMsg.textContent = "";
+
+      const direction = document.querySelector('input[name="direction"]:checked').value;
+      const person = document.getElementById("person").value.trim();
+      const amount = parseFloat(document.getElementById("amount").value);
+      const reason = document.getElementById("reason").value.trim();
+
+      try {
+        await tablesDB.createRow({
+          databaseId: DATABASE_ID,
+          tableId: TABLE_ID,
+          rowId: Appwrite.ID.unique(),
+          data: { person, amount, reason, direction, settled: false },
+          permissions: [
+            Appwrite.Permission.read(Appwrite.Role.user(currentUser.$id)),
+            Appwrite.Permission.update(Appwrite.Role.user(currentUser.$id)),
+            Appwrite.Permission.delete(Appwrite.Role.user(currentUser.$id)),
+          ],
+        });
+        e.target.reset();
+        await loadDebts();
+      } catch (err) {
+        errorMsg.textContent = err.message || "Speichern fehlgeschlagen.";
+      }
+    });
+
+    document.getElementById("logout-btn").addEventListener("click", logout);
+
+    init();
+  </script>
+</body>
+</html>

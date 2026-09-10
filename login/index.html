@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login – paulfunke.me</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="card auth-card">
+      <h2 id="form-title">Anmelden</h2>
+
+      <form id="auth-form">
+        <div id="name-field" class="hidden">
+          <label for="name">Name</label>
+          <input type="text" id="name" autocomplete="name" />
+        </div>
+
+        <label for="email">E-Mail</label>
+        <input type="email" id="email" required autocomplete="email" />
+
+        <label for="password">Passwort</label>
+        <input type="password" id="password" required autocomplete="current-password" minlength="8" />
+
+        <div class="btn-row">
+          <button type="submit" id="submit-btn">Anmelden</button>
+        </div>
+
+        <div class="error-msg" id="error-msg"></div>
+      </form>
+
+      <div class="switch-link">
+        <span id="switch-text">Noch kein Konto?</span>
+        <a id="switch-link">Registrieren</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script>
+    let mode = "login"; // or "register"
+
+    const form = document.getElementById("auth-form");
+    const nameField = document.getElementById("name-field");
+    const formTitle = document.getElementById("form-title");
+    const submitBtn = document.getElementById("submit-btn");
+    const switchText = document.getElementById("switch-text");
+    const switchLink = document.getElementById("switch-link");
+    const errorMsg = document.getElementById("error-msg");
+
+    // Falls bereits eingeloggt, direkt weiterleiten
+    getCurrentUser().then((user) => {
+      if (user) window.location.href = "/debts/";
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const redirectAfterLogin = params.get("redirect") || "/debts/";
+
+    switchLink.addEventListener("click", () => {
+      mode = mode === "login" ? "register" : "login";
+      const isRegister = mode === "register";
+      formTitle.textContent = isRegister ? "Registrieren" : "Anmelden";
+      submitBtn.textContent = isRegister ? "Registrieren" : "Anmelden";
+      switchText.textContent = isRegister ? "Schon ein Konto?" : "Noch kein Konto?";
+      switchLink.textContent = isRegister ? "Anmelden" : "Registrieren";
+      nameField.classList.toggle("hidden", !isRegister);
+      document.getElementById("password").setAttribute("autocomplete", isRegister ? "new-password" : "current-password");
+      errorMsg.textContent = "";
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.textContent = "";
+      submitBtn.disabled = true;
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const name = document.getElementById("name").value.trim();
+
+      try {
+        if (mode === "register") {
+          if (!name) {
+            errorMsg.textContent = "Bitte gib deinen Namen ein.";
+            submitBtn.disabled = false;
+            return;
+          }
+          await register(name, email, password);
+        } else {
+          await login(email, password);
+        }
+        window.location.href = redirectAfterLogin;
+      } catch (err) {
+        errorMsg.textContent = err.message || "Etwas ist schiefgelaufen.";
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
