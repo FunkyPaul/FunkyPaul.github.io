@@ -130,18 +130,23 @@
     const rollCountEl = document.getElementById("roll-count");
     const chipRow = document.getElementById("chip-row");
 
+    let lastRolledMask = null;
+    let lastFilled = null;
+
     function startTurn() {
       rollNumber = 0;
       diceValues = config.dice.map(() => null);
       heldMask = config.dice.map(() => false);
       usedChipThisTurn = false;
+      lastRolledMask = null;
+      lastFilled = null;
       updateTurnUI();
     }
 
     function updateTurnUI() {
       document.getElementById("turn-player-name").textContent = players[activePlayerIndex].name;
       const hasRolled = rollNumber > 0;
-      renderDice(diceTray, config, diceValues, heldMask, hasRolled ? toggleHold : null, !hasRolled);
+      renderDice(diceTray, config, diceValues, heldMask, hasRolled ? toggleHold : null, !hasRolled, lastRolledMask);
 
       const maxReached = rollNumber >= config.maxRolls && !usedChipThisTurn;
       rollBtn.disabled = rollNumber >= config.maxRolls + (usedChipThisTurn ? 1 : 0);
@@ -170,6 +175,7 @@
     }
 
     rollBtn.addEventListener("click", () => {
+      lastRolledMask = config.dice.map((_, i) => !heldMask[i]);
       diceValues = rollDice(variantId, heldMask, diceValues);
       rollNumber++;
       heldMask = config.dice.map(() => false);
@@ -188,7 +194,7 @@
       const hasRolled = rollNumber > 0;
       const filledIds = config.categories.filter((c) => players[activePlayerIndex].scores[c.id] !== null).map((c) => c.id);
       const preview = hasRolled ? computeAllScores(variantId, diceValues, filledIds) : null;
-      renderScorecard(document.getElementById("scorecard"), variantId, players, activePlayerIndex, preview, hasRolled ? handleCellClick : null);
+      renderScorecard(document.getElementById("scorecard"), variantId, players, activePlayerIndex, preview, hasRolled ? handleCellClick : null, lastFilled);
       document.getElementById("score-hint").textContent = hasRolled
         ? "Klicke auf ein hervorgehobenes Feld, um deinen Wurf einzutragen."
         : "Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.";
@@ -206,7 +212,9 @@
       player.scores[categoryId] = isJoker ? maxCategoryValue(variantId, categoryId) : scoreCategory(variantId, categoryId, diceValues);
       if (isJoker) player.bonusKniffelCount++;
 
-      advanceTurn();
+      lastFilled = { categoryId, playerIndex };
+      renderScoreboard();
+      setTimeout(advanceTurn, 550);
     }
 
     function advanceTurn() {

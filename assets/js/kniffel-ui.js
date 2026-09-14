@@ -8,7 +8,7 @@ function dieLabel(die, value) {
   return String(value);
 }
 
-function renderDice(container, config, values, heldMask, onToggle, disabled) {
+function renderDice(container, config, values, heldMask, onToggle, disabled, justRolledMask) {
   container.innerHTML = "";
   config.dice.forEach((die, i) => {
     const btn = document.createElement("button");
@@ -19,6 +19,14 @@ function renderDice(container, config, values, heldMask, onToggle, disabled) {
     btn.title = die.sides === 6 ? "6er-Würfel" : "10er-Würfel (0-9)";
     if (onToggle) btn.addEventListener("click", () => onToggle(i));
     container.appendChild(btn);
+    if (justRolledMask && justRolledMask[i]) {
+      // Klasse in einem zweiten Frame setzen, damit die Keyframe-Animation zuverlässig neu startet,
+      // und danach wieder entfernen - sonst bleibt pointer-events:none dauerhaft aktiv.
+      requestAnimationFrame(() => btn.classList.add("rolling"));
+      const clearRolling = () => btn.classList.remove("rolling");
+      btn.addEventListener("animationend", clearRolling, { once: true });
+      setTimeout(clearRolling, 600);
+    }
   });
 }
 
@@ -26,7 +34,7 @@ function sectionLabel(section) {
   return section === "upper" ? "Oben" : "Unten";
 }
 
-function renderScorecard(container, variantId, players, activePlayerIndex, previewScores, onCellClick) {
+function renderScorecard(container, variantId, players, activePlayerIndex, previewScores, onCellClick, justFilled) {
   const config = KNIFFEL_VARIANTS[variantId];
   container.innerHTML = "";
 
@@ -59,7 +67,8 @@ function renderScorecard(container, variantId, players, activePlayerIndex, previ
       const filled = player.scores[category.id];
       const isActive = i === activePlayerIndex;
       if (filled !== null && filled !== undefined) {
-        cells += `<td class="filled">${filled}</td>`;
+        const isJustFilled = justFilled && justFilled.categoryId === category.id && justFilled.playerIndex === i;
+        cells += `<td class="filled${isJustFilled ? " just-filled" : ""}">${filled}</td>`;
       } else if (isActive && previewScores && previewScores[category.id] !== undefined) {
         cells += `<td class="preview" data-category="${category.id}" data-player="${i}">${previewScores[category.id]}</td>`;
       } else {

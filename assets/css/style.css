@@ -2,29 +2,42 @@
   color-scheme: light dark;
   --bg: #f7f7f8;
   --surface: #ffffff;
+  --surface-raised: #ffffff;
   --text: #1a1a1a;
   --text-muted: #666;
   --border: #e0e0e0;
   --accent: #3d5afe;
   --accent-hover: #2f47d1;
+  --accent-soft: #eef0ff;
+  --accent-2: #ff6ec7;
   --danger: #d64545;
   --danger-hover: #b93838;
   --positive: #1f9254;
   --radius: 10px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.04), 0 1px 1px rgba(20, 20, 30, 0.03);
+  --shadow-md: 0 8px 24px rgba(20, 20, 30, 0.08), 0 2px 6px rgba(20, 20, 30, 0.04);
+  --shadow-lg: 0 16px 40px rgba(20, 20, 30, 0.12), 0 4px 12px rgba(20, 20, 30, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14151a;
-    --surface: #1e1f26;
-    --text: #f0f0f2;
+    --bg: #131319;
+    --surface: #1c1d24;
+    --surface-raised: #23242d;
+    --text: #f2f2f4;
     --text-muted: #9a9aa5;
-    --border: #33343d;
-    --accent: #5b7cfa;
-    --accent-hover: #7691ff;
+    --border: #34353f;
+    --accent: #6d84ff;
+    --accent-hover: #8a9bff;
+    --accent-soft: #262a45;
+    --accent-2: #ff7fd1;
     --danger: #e0605f;
     --danger-hover: #ea7a79;
     --positive: #3ecb82;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -60,9 +73,10 @@ header.top h1 {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  margin-bottom: 16px;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }
 
 .auth-card {
@@ -91,23 +105,41 @@ input, select {
 button {
   cursor: pointer;
   border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
+  border-radius: 10px;
+  padding: 11px 18px;
   font-size: 0.95rem;
   font-weight: 600;
   background: var(--accent);
   color: white;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 button:hover {
   background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+  transform: none;
+  box-shadow: none;
 }
 
 button.secondary {
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border);
+}
+
+button.secondary:hover {
+  background: var(--surface-raised);
+  color: var(--text);
 }
 
 button.danger {
@@ -357,13 +389,28 @@ button.danger:hover {
 /* Kniffel */
 
 .page-wide {
-  max-width: 960px;
+  max-width: 1040px;
+}
+
+.kniffel-header {
+  margin-bottom: 32px;
+}
+
+.kniffel-header h1 {
+  font-size: 1.8rem;
+  letter-spacing: -0.02em;
+}
+
+.kniffel-header .subtitle {
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-size: 0.95rem;
 }
 
 .game-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 20px;
 }
 
 @media (min-width: 720px) {
@@ -375,7 +422,7 @@ button.danger:hover {
 
 .game-select {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 @media (min-width: 560px) {
@@ -388,31 +435,41 @@ button.danger:hover {
   display: block;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px 20px;
+  border-radius: var(--radius-lg);
+  padding: 32px 26px;
   text-decoration: none;
   color: var(--text);
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .game-tile:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.game-tile .tile-icon {
+  font-size: 2rem;
+  margin-bottom: 12px;
+  display: block;
 }
 
 .game-tile h3 {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
+  font-size: 1.15rem;
 }
 
 .game-tile p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 .mode-select {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 @media (min-width: 480px) {
@@ -421,84 +478,133 @@ button.danger:hover {
   }
 }
 
+/* Würfel */
+
 .dice-tray {
   display: flex;
-  gap: 10px;
+  gap: 16px;
   flex-wrap: wrap;
   justify-content: center;
-  padding: 20px 0;
+  padding: 32px 8px;
 }
 
 .die {
-  width: 64px;
-  height: 64px;
-  font-size: 2rem;
-  border: 2px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  width: 72px;
+  height: 72px;
+  font-size: 2.2rem;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(155deg, var(--surface-raised), var(--surface));
   color: var(--text);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .die {
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+}
+
+.die:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: var(--shadow-md);
 }
 
 .die:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .die.held {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  background: linear-gradient(155deg, var(--accent), var(--accent-hover));
+  color: white;
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft);
+  transform: translateY(-2px);
 }
 
 .die.die-d10 {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   font-weight: 700;
-  border-style: dashed;
+  background: linear-gradient(155deg, var(--accent-soft), var(--surface));
+  border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.die.held.die-d10 {
+  background: linear-gradient(155deg, var(--accent-2), var(--accent));
+  border-style: solid;
+}
+
+.die.rolling {
+  animation: die-roll 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+@keyframes die-roll {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  30% {
+    transform: rotate(-12deg) scale(1.08);
+  }
+  60% {
+    transform: rotate(10deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
 }
 
 .roll-controls {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .roll-count {
   color: var(--text-muted);
   font-size: 0.85rem;
   text-align: center;
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .turn-banner {
   text-align: center;
   font-weight: 600;
-  margin-bottom: 8px;
+  font-size: 1.1rem;
+  margin-bottom: 4px;
 }
 
 .turn-banner .player-name {
   color: var(--accent);
 }
 
+/* Punktetafel */
+
 .score-table-wrap {
   overflow-x: auto;
+  margin-top: 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
 }
 
 .score-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.88rem;
 }
 
 .score-table th,
 .score-table td {
-  padding: 6px 8px;
+  padding: 12px 16px;
   text-align: center;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -508,6 +614,19 @@ button.danger:hover {
 .score-table td:first-child {
   text-align: left;
   white-space: normal;
+  padding-left: 18px;
+}
+
+.score-table thead th {
+  background: var(--surface-raised);
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  position: sticky;
+  top: 0;
 }
 
 .score-table th.active-player {
@@ -526,17 +645,34 @@ button.danger:hover {
 .score-table td.preview {
   cursor: pointer;
   color: var(--accent);
-  font-weight: 600;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-radius: 6px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 .score-table td.preview:hover {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 25%, var(--accent-soft));
+  transform: scale(1.06);
 }
 
 .score-table td.filled {
   font-weight: 600;
+}
+
+.score-table td.just-filled {
+  animation: score-pop 0.5s ease;
+}
+
+@keyframes score-pop {
+  0% {
+    background: var(--accent);
+    color: white;
+    transform: scale(1.15);
+  }
+  100% {
+    background: transparent;
+    transform: scale(1);
+  }
 }
 
 .score-table tr.section-row td {
@@ -544,21 +680,31 @@ button.danger:hover {
   font-weight: 600;
   text-align: left;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .score-table tr.sum-row td {
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+  background: var(--bg);
 }
 
 .score-table tr.total-row td {
-  font-weight: 700;
-  font-size: 0.95rem;
+  font-weight: 800;
+  font-size: 1rem;
   border-top: 2px solid var(--border);
   border-bottom: none;
+  background: var(--accent-soft);
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.score-table tr.total-row td:first-child {
+  border-radius: 0 0 0 var(--radius);
 }
 
 .chip-row {
@@ -566,16 +712,16 @@ button.danger:hover {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 4px;
-  font-size: 0.85rem;
+  margin-top: 10px;
+  font-size: 0.88rem;
   color: var(--text-muted);
 }
 
 .player-setup-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .player-setup-row input {
@@ -583,19 +729,22 @@ button.danger:hover {
 }
 
 .player-list {
-  margin-top: 8px;
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .player-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  gap: 8px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
   border-radius: 20px;
-  padding: 6px 12px;
-  margin: 4px 4px 0 0;
-  font-size: 0.85rem;
+  padding: 8px 14px;
+  font-size: 0.88rem;
+  font-weight: 500;
 }
 
 .player-chip button {
@@ -608,59 +757,72 @@ button.danger:hover {
 
 .join-code {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 1.1rem;
-  letter-spacing: 0.05em;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  display: inline-block;
+  font-size: 1.2rem;
+  letter-spacing: 0.06em;
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: block;
+  margin: 12px 0;
+  word-break: break-all;
 }
 
 .lobby-players {
-  margin: 12px 0;
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .lobby-player {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.lobby-player:last-child {
-  border-bottom: none;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
 }
 
 .badge {
   font-size: 0.75rem;
-  color: var(--text-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
   border-radius: 12px;
-  padding: 2px 8px;
+  padding: 3px 10px;
+  font-weight: 600;
 }
 
 .game-log {
-  max-height: 140px;
+  max-height: 160px;
   overflow-y: auto;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
   background: var(--bg);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-top: 12px;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-top: 20px;
 }
 
 .game-log div {
-  padding: 2px 0;
+  padding: 4px 0;
 }
 
 .winner-banner {
   text-align: center;
-  padding: 12px;
-  font-weight: 700;
-  font-size: 1.1rem;
+  padding: 28px 16px;
+  font-weight: 800;
+  font-size: 1.3rem;
   color: var(--positive);
+  background: linear-gradient(155deg, var(--accent-soft), transparent);
+  border-radius: var(--radius-lg);
+  margin-bottom: 12px;
+}
+
+/* Sections generally: more breathing room between stacked cards */
+
+.game-card-group > .card {
+  margin-bottom: 24px;
 }

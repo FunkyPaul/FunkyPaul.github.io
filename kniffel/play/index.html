@@ -289,8 +289,12 @@
       return state && state.players[state.activePlayerIndex] && state.players[state.activePlayerIndex].id === myPlayerId;
     }
 
+    let lastRolledMask = null;
+    let lastFilled = null;
+
     rollBtn.addEventListener("click", async () => {
       if (!isMyTurn()) return;
+      lastRolledMask = config.dice.map((_, i) => !state.heldMask[i]);
       state.diceValues = rollDice(variantId, state.heldMask, state.diceValues);
       state.rollNumber++;
       state.heldMask = config.dice.map(() => false);
@@ -372,7 +376,8 @@
 
       const myTurn = isMyTurn();
       const hasRolled = state.rollNumber > 0;
-      renderDice(diceTray, config, state.diceValues, state.heldMask, myTurn && hasRolled ? toggleHold : null, !(myTurn && hasRolled));
+      renderDice(diceTray, config, state.diceValues, state.heldMask, myTurn && hasRolled ? toggleHold : null, !(myTurn && hasRolled), lastRolledMask);
+      lastRolledMask = null;
 
       rollBtn.disabled = !myTurn || state.rollNumber >= config.maxRolls + (state.usedChipThisTurn ? 1 : 0);
       rollBtn.textContent = state.rollNumber === 0 ? "Würfeln" : "Nochmal würfeln";
