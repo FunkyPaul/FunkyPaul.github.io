@@ -963,3 +963,10 @@ header.top .header-actions {
   font-size: 0.85rem;
   color: var(--text-muted);
 }
+
+.history-delete-btn {
+  margin-left: auto;
+  padding: 4px 9px;
+  font-size: 0.8rem;
+  line-height: 1;
+}

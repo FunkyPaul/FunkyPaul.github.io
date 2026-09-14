@@ -55,6 +55,9 @@
 
     const variantNames = { kniffel: "Kniffel", kniffel_extreme: "Kniffel Extreme" };
 
+    let currentUserId = null;
+    let historyRows = [];
+
     function escapeHtml(str) {
       const div = document.createElement("div");
       div.textContent = str == null ? "" : String(str);
@@ -73,8 +76,8 @@
         return;
       }
 
-      await loadOpenSessions(user.$id);
-      await loadHistory(user.$id);
+      currentUserId = user.$id;
+      await Promise.all([loadOpenSessions(user.$id), loadHistory(user.$id)]);
     }
 
     async function loadOpenSessions(userId) {
@@ -119,13 +122,13 @@
         tableId: HISTORY_TABLE_ID,
         queries: [Appwrite.Query.contains("participantUserIds", userId), Appwrite.Query.orderDesc("endedAt"), Appwrite.Query.limit(50)],
       });
-      const rows = res.rows;
+      historyRows = res.rows;
 
       document.getElementById("history-card").classList.remove("hidden");
       document.getElementById("history-list-card").classList.remove("hidden");
 
-      renderStats(rows, userId);
-      renderHistoryList(rows, userId);
+      renderStats(historyRows, userId);
+      renderHistoryList(historyRows, userId);
     }
 
     function renderStats(rows, userId) {
@@ -177,16 +180,36 @@
           .join(" · ");
 
         return `
-          <div class="history-entry${isCancelled ? " cancelled" : ""}">
+          <div class="history-entry${isCancelled ? " cancelled" : ""}" data-row-id="${row.$id}">
             <div class="history-entry-header">
               <strong>${variantNames[row.variant]}</strong>
               <span class="badge">${isCancelled ? "Abgebrochen" : isWinner ? "Sieg" : "Beendet"}</span>
               <span class="roll-count" style="margin:0">${fmtDate(row.endedAt)}</span>
+              <button type="button" class="danger history-delete-btn" data-row-id="${row.$id}" title="Aus dem Verlauf löschen">✕</button>
             </div>
             <div class="history-entry-players">${playersLine}</div>
           </div>
         `;
       }).join("");
+
+      list.querySelectorAll(".history-delete-btn").forEach((btn) => {
+        btn.addEventListener("click", () => deleteHistoryEntry(btn.dataset.rowId));
+      });
+    }
+
+    async function deleteHistoryEntry(rowId) {
+      if (!confirm("Diesen Eintrag unwiderruflich aus dem Verlauf löschen?")) return;
+      const entryEl = document.querySelector(`.history-entry[data-row-id="${rowId}"]`);
+      if (entryEl) entryEl.style.opacity = "0.4";
+      try {
+        await tablesDB.deleteRow({ databaseId: DATABASE_ID, tableId: HISTORY_TABLE_ID, rowId });
+        historyRows = historyRows.filter((r) => r.$id !== rowId);
+        renderStats(historyRows, currentUserId);
+        renderHistoryList(historyRows, currentUserId);
+      } catch (err) {
+        if (entryEl) entryEl.style.opacity = "1";
+        alert("Löschen fehlgeschlagen: " + (err.message || "Unbekannter Fehler"));
+      }
     }
 
     init();
