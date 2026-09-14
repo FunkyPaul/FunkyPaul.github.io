@@ -30,3 +30,7 @@ async function logout() {
   await account.deleteSession("current");
   window.location.href = "/login/";
 }
+
+async function changePassword(newPassword, oldPassword) {
+  await account.updatePassword(newPassword, oldPassword);
+}

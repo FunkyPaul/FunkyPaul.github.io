@@ -10,7 +10,10 @@
   <div class="page">
     <header class="top">
       <h1 id="page-title">Kniffel</h1>
-      <a href="/kniffel/"><button class="secondary">Zurück</button></a>
+      <div class="header-actions">
+        <a href="/kniffel/"><button class="secondary">Zurück</button></a>
+        <span id="account-menu"></span>
+      </div>
     </header>
 
     <div class="card">
@@ -28,6 +31,10 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script src="/assets/js/kniffel-account-menu.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const variant = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";

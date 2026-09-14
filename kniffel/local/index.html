@@ -10,7 +10,10 @@
   <div class="page page-wide">
     <header class="top">
       <h1 id="page-title">Kniffel</h1>
-      <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+      <div class="header-actions">
+        <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+        <span id="account-menu"></span>
+      </div>
     </header>
 
     <div id="setup-card" class="card">
@@ -20,6 +23,10 @@
         <button type="button" id="add-player-btn">Hinzufügen</button>
       </div>
       <div class="player-list" id="player-list"></div>
+      <div id="my-player-field" class="hidden">
+        <label for="my-player-select">Welche Spalte bist du? (für deinen Verlauf)</label>
+        <select id="my-player-select"></select>
+      </div>
       <div class="error-msg" id="setup-error"></div>
       <div class="btn-row">
         <button type="button" id="start-game-btn">Spiel starten</button>
@@ -45,6 +52,14 @@
         <p class="roll-count" id="score-hint">Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.</p>
         <div class="score-table-wrap" id="scorecard"></div>
       </div>
+
+      <div class="card host-controls">
+        <h3 style="margin-top:0">Spiel beenden</h3>
+        <p class="roll-count">Beendet die Partie vorzeitig. Der aktuelle Punktestand bleibt erhalten (kein Sieger).</p>
+        <div class="btn-row">
+          <button type="button" class="danger" id="end-local-game-btn">Partie beenden</button>
+        </div>
+      </div>
     </div>
 
     <div id="finished-card" class="card hidden">
@@ -52,12 +67,18 @@
       <div class="score-table-wrap" id="final-scorecard"></div>
       <div class="btn-row">
         <a href="/kniffel/local/?variant=kniffel"><button class="secondary">Neues Spiel</button></a>
+        <a href="/kniffel/meine-partien/" id="history-link-btn" class="hidden"><button class="secondary">Zum Verlauf</button></a>
       </div>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script src="/assets/js/kniffel-account-menu.js"></script>
   <script src="/assets/js/kniffel-engine.js"></script>
   <script src="/assets/js/kniffel-ui.js"></script>
+  <script src="/assets/js/kniffel-history.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const variantId = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
@@ -70,11 +91,19 @@
     let diceValues = config.dice.map(() => null);
     let heldMask = config.dice.map(() => false);
     let usedChipThisTurn = false;
+    let currentUserId = null; // gesetzt, falls beim Start jemand eingeloggt war
+
+    getCurrentUser().then((user) => {
+      currentUserId = user ? user.$id : null;
+      if (currentUserId) document.getElementById("my-player-field").classList.remove("hidden");
+      renderPlayerList();
+    });
 
     // --- Setup ---
     const playerListEl = document.getElementById("player-list");
     const nameInput = document.getElementById("player-name-input");
     const setupError = document.getElementById("setup-error");
+    const myPlayerSelect = document.getElementById("my-player-select");
     let setupNames = [];
 
     function renderPlayerList() {
@@ -87,6 +116,14 @@
           renderPlayerList();
         });
       });
+
+      if (currentUserId) {
+        const previousValue = myPlayerSelect.value;
+        myPlayerSelect.innerHTML =
+          '<option value="">Keiner (nicht mitzählen)</option>' +
+          setupNames.map((name, i) => `<option value="${i}">${escapeHtml(name)}</option>`).join("");
+        if (previousValue && setupNames[previousValue] !== undefined) myPlayerSelect.value = previousValue;
+      }
     }
 
     function addPlayer() {
@@ -117,7 +154,12 @@
         setupError.textContent = "Mindestens 2 Spieler:innen nötig.";
         return;
       }
-      players = setupNames.map((name) => ({ name, ...createEmptyPlayerScore(variantId) }));
+      const myIndex = currentUserId && myPlayerSelect.value !== "" ? parseInt(myPlayerSelect.value, 10) : -1;
+      players = setupNames.map((name, i) => ({
+        name,
+        userId: i === myIndex ? currentUserId : null,
+        ...createEmptyPlayerScore(variantId),
+      }));
       document.getElementById("setup-card").classList.add("hidden");
       document.getElementById("game-card").classList.remove("hidden");
       startTurn();
@@ -219,25 +261,42 @@
 
     function advanceTurn() {
       if (isGameFinished(variantId, players)) {
-        showFinished();
+        showFinished("finished");
         return;
       }
       activePlayerIndex = (activePlayerIndex + 1) % players.length;
       startTurn();
     }
 
-    function showFinished() {
+    document.getElementById("end-local-game-btn").addEventListener("click", () => {
+      if (!confirm("Partie vorzeitig beenden? Der aktuelle Punktestand wird festgehalten, es gibt keinen Gewinner.")) return;
+      showFinished("cancelled");
+    });
+
+    function showFinished(status) {
       document.getElementById("game-card").classList.add("hidden");
       const finishedCard = document.getElementById("finished-card");
       finishedCard.classList.remove("hidden");
 
-      const totals = players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
-      const maxTotal = Math.max(...totals);
-      const winners = players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
-      document.getElementById("winner-banner").textContent =
-        winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+      const winnerBanner = document.getElementById("winner-banner");
+      if (status === "cancelled") {
+        winnerBanner.textContent = "Partie wurde vorzeitig beendet.";
+        winnerBanner.classList.remove("winner-banner");
+        winnerBanner.classList.add("cancelled-banner");
+      } else {
+        winnerBanner.classList.remove("cancelled-banner");
+        winnerBanner.classList.add("winner-banner");
+        const totals = players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
+        const maxTotal = Math.max(...totals);
+        const winners = players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
+        winnerBanner.textContent =
+          winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+      }
 
       renderScorecard(document.getElementById("final-scorecard"), variantId, players, -1, null, null);
+
+      document.getElementById("history-link-btn").classList.toggle("hidden", !currentUserId);
+      writeKniffelHistory(variantId, players, status);
     }
 
     function escapeHtml(str) {

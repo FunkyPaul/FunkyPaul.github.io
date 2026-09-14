@@ -11,9 +11,8 @@
     <header class="top">
       <h1 id="page-title">Kniffel online</h1>
       <div class="header-actions">
-        <span class="account-badge hidden" id="account-badge"></span>
-        <a class="hidden" id="login-link"><button class="secondary">Einloggen</button></a>
         <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+        <span id="account-menu"></span>
       </div>
     </header>
 
@@ -115,12 +114,13 @@
   <script src="/assets/js/appwrite-config.js"></script>
   <script src="/assets/js/auth.js"></script>
   <script src="/assets/js/kniffel-identity.js"></script>
+  <script src="/assets/js/kniffel-account-menu.js"></script>
   <script src="/assets/js/kniffel-engine.js"></script>
   <script src="/assets/js/kniffel-ui.js"></script>
+  <script src="/assets/js/kniffel-history.js"></script>
   <script>
     const DATABASE_ID = "main";
     const TABLE_ID = "game_sessions";
-    const HISTORY_TABLE_ID = "game_history";
 
     const params = new URLSearchParams(window.location.search);
     const variantId = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
@@ -147,17 +147,11 @@
     async function init() {
       identity = await resolveIdentity();
       myPlayerId = identity.userId;
+      renderAccountMenu();
 
-      const loginLink = document.getElementById("login-link");
-      const accountBadge = document.getElementById("account-badge");
       if (identity.isLoggedIn) {
-        accountBadge.textContent = `Eingeloggt als ${identity.name}`;
-        accountBadge.classList.remove("hidden");
         document.getElementById("create-name-field").classList.add("hidden");
         document.getElementById("join-name-field").classList.add("hidden");
-      } else {
-        loginLink.href = kniffelLoginUrl(window.location.href);
-        loginLink.classList.remove("hidden");
       }
 
       if (joinCode) {
@@ -335,37 +329,6 @@
       });
     }
 
-    function buildHistoryPlayers() {
-      return state.players.map((p) => {
-        const totals = computeTotal(variantId, p.scores, p.bonusKniffelCount);
-        return { name: p.name, userId: p.userId || null, total: totals.total, scores: p.scores };
-      });
-    }
-
-    async function writeHistory(status) {
-      const historyPlayers = buildHistoryPlayers();
-      const maxTotal = Math.max(...historyPlayers.map((p) => p.total));
-      const winners = historyPlayers.filter((p) => p.total === maxTotal).map((p) => p.name);
-      const participantUserIds = state.players.filter((p) => p.userId).map((p) => p.userId);
-
-      try {
-        await tablesDB.createRow({
-          databaseId: DATABASE_ID,
-          tableId: HISTORY_TABLE_ID,
-          rowId: Appwrite.ID.unique(),
-          data: {
-            variant: variantId,
-            status,
-            players: JSON.stringify(historyPlayers),
-            participantUserIds,
-            endedAt: new Date().toISOString(),
-            winnerName: status === "finished" ? winners.join(", ") : null,
-          },
-        });
-      } catch (err) {
-        // Verlaufseintrag ist ein Zusatz - ein Fehler hier soll das laufende Spiel nicht blockieren.
-      }
-    }
 
     function subscribeToSession() {
       const channel = `databases.${DATABASE_ID}.tables.${TABLE_ID}.rows.${sessionRow.$id}`;
@@ -436,7 +399,7 @@
     document.getElementById("end-game-btn").addEventListener("click", async () => {
       if (!isHost) return;
       if (!confirm("Partie vorzeitig beenden? Der aktuelle Punktestand wird im Verlauf gespeichert, es gibt keinen Gewinner.")) return;
-      await writeHistory("cancelled");
+      await writeKniffelHistory(variantId, state.players, "cancelled");
       await setStatus("cancelled");
     });
 
@@ -494,7 +457,7 @@
       if (isJoker) player.bonusKniffelCount++;
 
       if (isGameFinished(variantId, state.players)) {
-        await writeHistory("finished");
+        await writeKniffelHistory(variantId, state.players, "finished");
         await setStatus("finished");
         return;
       }
