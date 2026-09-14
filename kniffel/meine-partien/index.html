@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meine Partien – paulfunke.me</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page page-wide">
+    <header class="top">
+      <h1>Meine Partien</h1>
+      <div class="header-actions">
+        <a href="/kniffel/"><button class="secondary">Zu Kniffel</button></a>
+      </div>
+    </header>
+
+    <div id="logged-out-card" class="card hidden">
+      <h3 style="margin-top:0">Nicht eingeloggt</h3>
+      <p>Um laufende Partien wiederzufinden und deine Statistik zu sehen, logge dich ein.</p>
+      <div class="btn-row">
+        <a id="login-link"><button type="button">Einloggen</button></a>
+      </div>
+    </div>
+
+    <div id="open-card" class="card hidden">
+      <h3 style="margin-top:0">Offene Partien</h3>
+      <div id="open-list"></div>
+      <p class="roll-count" id="open-empty">Keine laufenden Partien.</p>
+    </div>
+
+    <div id="history-card" class="card hidden">
+      <h3 style="margin-top:0">Statistik</h3>
+      <div class="stats-summary" id="stats-summary"></div>
+    </div>
+
+    <div id="history-list-card" class="card hidden">
+      <h3 style="margin-top:0">Verlauf</h3>
+      <div id="history-list"></div>
+      <p class="roll-count" id="history-empty">Noch keine gespielten Partien.</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script src="/assets/js/kniffel-identity.js"></script>
+  <script src="/assets/js/kniffel-engine.js"></script>
+  <script>
+    const DATABASE_ID = "main";
+    const SESSIONS_TABLE_ID = "game_sessions";
+    const HISTORY_TABLE_ID = "game_history";
+
+    const variantNames = { kniffel: "Kniffel", kniffel_extreme: "Kniffel Extreme" };
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str == null ? "" : String(str);
+      return div.innerHTML;
+    }
+
+    function fmtDate(iso) {
+      return new Date(iso).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    async function init() {
+      const user = await getCurrentUser();
+      if (!user) {
+        document.getElementById("logged-out-card").classList.remove("hidden");
+        document.getElementById("login-link").href = kniffelLoginUrl(window.location.href);
+        return;
+      }
+
+      await loadOpenSessions(user.$id);
+      await loadHistory(user.$id);
+    }
+
+    async function loadOpenSessions(userId) {
+      const res = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: SESSIONS_TABLE_ID,
+        queries: [Appwrite.Query.equal("hostUserId", userId), Appwrite.Query.orderDesc("$createdAt"), Appwrite.Query.limit(20)],
+      });
+      const open = res.rows.filter((r) => r.status === "lobby" || r.status === "playing");
+
+      const card = document.getElementById("open-card");
+      card.classList.remove("hidden");
+      const list = document.getElementById("open-list");
+      const emptyMsg = document.getElementById("open-empty");
+
+      if (open.length === 0) {
+        emptyMsg.classList.remove("hidden");
+        list.innerHTML = "";
+        return;
+      }
+      emptyMsg.classList.add("hidden");
+
+      list.innerHTML = open.map((row) => {
+        const state = JSON.parse(row.state);
+        const playerNames = state.players.map((p) => escapeHtml(p.name)).join(", ");
+        const statusLabel = row.status === "lobby" ? "Lobby" : "läuft";
+        return `
+          <div class="lobby-player">
+            <span>
+              <strong>${variantNames[row.variant]}</strong> · ${escapeHtml(statusLabel)}<br>
+              <span class="roll-count" style="margin:0;text-align:left">${playerNames}</span>
+            </span>
+            <a href="/kniffel/play/?variant=${row.variant}&code=${row.code}"><button type="button">Weiter spielen</button></a>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function loadHistory(userId) {
+      const res = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: HISTORY_TABLE_ID,
+        queries: [Appwrite.Query.contains("participantUserIds", userId), Appwrite.Query.orderDesc("endedAt"), Appwrite.Query.limit(50)],
+      });
+      const rows = res.rows;
+
+      document.getElementById("history-card").classList.remove("hidden");
+      document.getElementById("history-list-card").classList.remove("hidden");
+
+      renderStats(rows, userId);
+      renderHistoryList(rows, userId);
+    }
+
+    function renderStats(rows, userId) {
+      const finished = rows.filter((r) => r.status === "finished");
+      let wins = 0;
+      let totalScore = 0;
+      let scoredGames = 0;
+
+      finished.forEach((row) => {
+        const players = JSON.parse(row.players);
+        const me = players.find((p) => p.userId === userId);
+        if (!me) return;
+        totalScore += me.total;
+        scoredGames++;
+        const maxTotal = Math.max(...players.map((p) => p.total));
+        if (me.total === maxTotal) wins++;
+      });
+
+      const avg = scoredGames > 0 ? Math.round(totalScore / scoredGames) : 0;
+      const summary = document.getElementById("stats-summary");
+      summary.innerHTML = `
+        <div class="stat-tile"><div class="stat-value">${rows.length}</div><div class="stat-label">Partien gesamt</div></div>
+        <div class="stat-tile"><div class="stat-value">${finished.length}</div><div class="stat-label">Abgeschlossen</div></div>
+        <div class="stat-tile"><div class="stat-value">${wins}</div><div class="stat-label">Siege</div></div>
+        <div class="stat-tile"><div class="stat-value">${avg}</div><div class="stat-label">Ø Punkte</div></div>
+      `;
+    }
+
+    function renderHistoryList(rows, userId) {
+      const list = document.getElementById("history-list");
+      const emptyMsg = document.getElementById("history-empty");
+
+      if (rows.length === 0) {
+        emptyMsg.classList.remove("hidden");
+        list.innerHTML = "";
+        return;
+      }
+      emptyMsg.classList.add("hidden");
+
+      list.innerHTML = rows.map((row) => {
+        const players = JSON.parse(row.players);
+        const me = players.find((p) => p.userId === userId);
+        const isCancelled = row.status === "cancelled";
+        const isWinner = !isCancelled && row.winnerName && row.winnerName.split(", ").includes(me ? me.name : "");
+        const playersLine = players
+          .slice()
+          .sort((a, b) => b.total - a.total)
+          .map((p) => `${escapeHtml(p.name)}: ${p.total}`)
+          .join(" · ");
+
+        return `
+          <div class="history-entry${isCancelled ? " cancelled" : ""}">
+            <div class="history-entry-header">
+              <strong>${variantNames[row.variant]}</strong>
+              <span class="badge">${isCancelled ? "Abgebrochen" : isWinner ? "Sieg" : "Beendet"}</span>
+              <span class="roll-count" style="margin:0">${fmtDate(row.endedAt)}</span>
+            </div>
+            <div class="history-entry-players">${playersLine}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    init();
+  </script>
+</body>
+</html>

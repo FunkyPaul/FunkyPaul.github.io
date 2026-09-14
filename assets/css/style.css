@@ -821,8 +821,102 @@ button.danger:hover {
   margin-bottom: 12px;
 }
 
+.cancelled-banner {
+  text-align: center;
+  padding: 28px 16px;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  margin-bottom: 12px;
+}
+
 /* Sections generally: more breathing room between stacked cards */
 
 .game-card-group > .card {
   margin-bottom: 24px;
+}
+
+/* Header/account/host controls */
+
+header.top .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-badge {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px 12px;
+}
+
+.host-controls {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+/* Meine Partien / Statistik */
+
+.stats-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 480px) {
+  .stats-summary {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.stat-tile {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 18px 14px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.history-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.history-entry:last-child {
+  margin-bottom: 0;
+}
+
+.history-entry.cancelled {
+  opacity: 0.7;
+}
+
+.history-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.history-entry-players {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }

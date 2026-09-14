@@ -51,13 +51,13 @@
     const switchLink = document.getElementById("switch-link");
     const errorMsg = document.getElementById("error-msg");
 
-    // Falls bereits eingeloggt, direkt weiterleiten
-    getCurrentUser().then((user) => {
-      if (user) window.location.href = "/debts/";
-    });
-
     const params = new URLSearchParams(window.location.search);
     const redirectAfterLogin = params.get("redirect") || "/debts/";
+
+    // Falls bereits eingeloggt, direkt weiterleiten
+    getCurrentUser().then((user) => {
+      if (user) window.location.href = redirectAfterLogin;
+    });
 
     switchLink.addEventListener("click", () => {
       mode = mode === "login" ? "register" : "login";

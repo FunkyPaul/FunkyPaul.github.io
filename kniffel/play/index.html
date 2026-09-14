@@ -10,23 +10,41 @@
   <div class="page page-wide">
     <header class="top">
       <h1 id="page-title">Kniffel online</h1>
-      <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+      <div class="header-actions">
+        <span class="account-badge hidden" id="account-badge"></span>
+        <a class="hidden" id="login-link"><button class="secondary">Einloggen</button></a>
+        <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+      </div>
     </header>
+
+    <!-- Schritt 0: Wiedereinstieg für eingeloggte Spieler:innen -->
+    <div id="resume-card" class="card hidden">
+      <h3 style="margin-top:0">Laufende Partie gefunden</h3>
+      <p class="roll-count" id="resume-text"></p>
+      <div class="btn-row">
+        <button type="button" id="resume-btn">Weiter spielen</button>
+        <button type="button" class="secondary" id="resume-dismiss-btn">Neue Partie stattdessen</button>
+      </div>
+    </div>
 
     <!-- Schritt 1: Erstellen oder Beitreten -->
     <div id="start-card" class="card">
       <h3 style="margin-top:0" id="start-title">Neue Online-Partie</h3>
       <div id="create-block">
-        <label for="host-name">Dein Name</label>
-        <input type="text" id="host-name" maxlength="20" placeholder="Name eingeben..." />
+        <div id="create-name-field">
+          <label for="host-name">Dein Name</label>
+          <input type="text" id="host-name" maxlength="20" placeholder="Name eingeben..." />
+        </div>
         <div class="btn-row">
           <button type="button" id="create-btn">Partie erstellen</button>
         </div>
       </div>
       <div id="join-block" class="hidden">
         <p class="roll-count">Du wurdest zu einer Partie eingeladen.</p>
-        <label for="join-name">Dein Name</label>
-        <input type="text" id="join-name" maxlength="20" placeholder="Name eingeben..." />
+        <div id="join-name-field">
+          <label for="join-name">Dein Name</label>
+          <input type="text" id="join-name" maxlength="20" placeholder="Name eingeben..." />
+        </div>
         <div class="btn-row">
           <button type="button" id="join-btn">Beitreten</button>
         </div>
@@ -46,6 +64,7 @@
       <div class="error-msg" id="lobby-error"></div>
       <div class="btn-row">
         <button type="button" id="start-online-game-btn">Spiel starten</button>
+        <button type="button" class="danger hidden" id="delete-lobby-btn">Partie löschen</button>
       </div>
       <p class="roll-count">Mindestens 2, maximal 6 Spieler:innen. Nur die Person, die die Partie erstellt hat, kann starten.</p>
     </div>
@@ -71,6 +90,15 @@
         <p class="roll-count" id="score-hint"></p>
         <div class="score-table-wrap" id="scorecard"></div>
       </div>
+
+      <div class="card host-controls hidden" id="host-controls">
+        <h3 style="margin-top:0">Host-Optionen</h3>
+        <p class="roll-count">Als Ersteller:in der Partie kannst du sie hier vorzeitig beenden oder ganz löschen.</p>
+        <div class="btn-row">
+          <button type="button" class="secondary" id="end-game-btn">Partie beenden</button>
+          <button type="button" class="danger" id="delete-game-btn">Partie löschen</button>
+        </div>
+      </div>
     </div>
 
     <div id="finished-card" class="card hidden">
@@ -78,17 +106,21 @@
       <div class="score-table-wrap" id="final-scorecard"></div>
       <div class="btn-row">
         <a href="/kniffel/"><button class="secondary">Zurück zur Auswahl</button></a>
+        <a href="/kniffel/meine-partien/"><button class="secondary" id="history-link-btn">Zum Verlauf</button></a>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
   <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script src="/assets/js/kniffel-identity.js"></script>
   <script src="/assets/js/kniffel-engine.js"></script>
   <script src="/assets/js/kniffel-ui.js"></script>
   <script>
     const DATABASE_ID = "main";
     const TABLE_ID = "game_sessions";
+    const HISTORY_TABLE_ID = "game_history";
 
     const params = new URLSearchParams(window.location.search);
     const variantId = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
@@ -96,18 +128,9 @@
     const joinCode = params.get("code");
 
     document.getElementById("page-title").textContent = config.name + " online";
+    document.getElementById("history-link-btn").classList.toggle("hidden", true);
 
-    // Jeder Client (Gast ohne Account) bekommt eine stabile lokale ID.
-    function getGuestId() {
-      let id = localStorage.getItem("kniffel_guest_id");
-      if (!id) {
-        id = "g_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-        localStorage.setItem("kniffel_guest_id", id);
-      }
-      return id;
-    }
-    const guestId = getGuestId();
-
+    let identity = null; // { userId, isLoggedIn, name }
     let sessionRow = null; // Appwrite-Row
     let state = null; // geparster JSON-Zustand
     let unsubscribe = null;
@@ -121,8 +144,92 @@
       return code;
     }
 
+    async function init() {
+      identity = await resolveIdentity();
+      myPlayerId = identity.userId;
+
+      const loginLink = document.getElementById("login-link");
+      const accountBadge = document.getElementById("account-badge");
+      if (identity.isLoggedIn) {
+        accountBadge.textContent = `Eingeloggt als ${identity.name}`;
+        accountBadge.classList.remove("hidden");
+        document.getElementById("create-name-field").classList.add("hidden");
+        document.getElementById("join-name-field").classList.add("hidden");
+      } else {
+        loginLink.href = kniffelLoginUrl(window.location.href);
+        loginLink.classList.remove("hidden");
+      }
+
+      if (joinCode) {
+        document.getElementById("start-title").textContent = "Partie beitreten";
+        document.getElementById("create-block").classList.add("hidden");
+        document.getElementById("join-block").classList.remove("hidden");
+        await tryDirectRejoin();
+      } else if (identity.isLoggedIn) {
+        await checkForResumableSession();
+      }
+    }
+
+    // Eingeloggt + Link mit Code: falls man selbst schon Teilnehmer:in ist, direkt rein.
+    async function tryDirectRejoin() {
+      if (!identity.isLoggedIn) return;
+      const res = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        queries: [Appwrite.Query.equal("code", joinCode), Appwrite.Query.limit(1)],
+      });
+      if (res.rows.length === 0) return;
+      const row = res.rows[0];
+      const rowState = JSON.parse(row.state);
+      const alreadyIn = rowState.players.some((p) => p.userId === identity.userId);
+      if (alreadyIn && (row.status === "lobby" || row.status === "playing")) {
+        sessionRow = row;
+        state = rowState;
+        isHost = state.hostId === myPlayerId;
+        subscribeToSession();
+        enterSession();
+      }
+    }
+
+    // Eingeloggt, kein Code in der URL: nach offener eigener Partie dieser Variante suchen.
+    async function checkForResumableSession() {
+      const res = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        queries: [
+          Appwrite.Query.equal("variant", variantId),
+          Appwrite.Query.equal("hostUserId", identity.userId),
+          Appwrite.Query.orderDesc("$createdAt"),
+          Appwrite.Query.limit(10),
+        ],
+      });
+      const open = res.rows.find((r) => r.status === "lobby" || r.status === "playing");
+      if (!open) return;
+
+      document.getElementById("resume-card").classList.remove("hidden");
+      document.getElementById("resume-text").textContent =
+        `${config.name}-Partie mit Code ${open.code}, Status: ${open.status === "lobby" ? "Lobby" : "läuft"}.`;
+
+      document.getElementById("resume-btn").addEventListener("click", () => {
+        sessionRow = open;
+        state = JSON.parse(open.state);
+        isHost = true;
+        subscribeToSession();
+        enterSession();
+      });
+      document.getElementById("resume-dismiss-btn").addEventListener("click", () => {
+        document.getElementById("resume-card").classList.add("hidden");
+      });
+    }
+
+    function enterSession() {
+      document.getElementById("resume-card").classList.add("hidden");
+      history.replaceState(null, "", `/kniffel/play/?variant=${variantId}&code=${sessionRow.code}`);
+      showLobby();
+    }
+
     async function createSession() {
-      const name = document.getElementById("host-name").value.trim();
+      const name = identity.isLoggedIn ? identity.name : document.getElementById("host-name").value.trim();
       const errorEl = document.getElementById("start-error");
       errorEl.textContent = "";
       if (!name) {
@@ -130,11 +237,10 @@
         return;
       }
 
-      myPlayerId = guestId;
       isHost = true;
       const code = generateCode();
       const initialState = {
-        players: [{ id: myPlayerId, name, ...createEmptyPlayerScore(variantId) }],
+        players: [{ id: myPlayerId, userId: identity.isLoggedIn ? identity.userId : null, name, ...createEmptyPlayerScore(variantId) }],
         hostId: myPlayerId,
         activePlayerIndex: 0,
         rollNumber: 0,
@@ -149,19 +255,24 @@
           databaseId: DATABASE_ID,
           tableId: TABLE_ID,
           rowId: Appwrite.ID.unique(),
-          data: { code, variant: variantId, status: "lobby", state: JSON.stringify(initialState) },
+          data: {
+            code,
+            variant: variantId,
+            status: "lobby",
+            state: JSON.stringify(initialState),
+            hostUserId: identity.isLoggedIn ? identity.userId : null,
+          },
         });
         state = initialState;
-        history.replaceState(null, "", `/kniffel/play/?variant=${variantId}&code=${code}`);
         subscribeToSession();
-        showLobby();
+        enterSession();
       } catch (err) {
         errorEl.textContent = err.message || "Partie konnte nicht erstellt werden.";
       }
     }
 
     async function joinSession() {
-      const name = document.getElementById("join-name").value.trim();
+      const name = identity.isLoggedIn ? identity.name : document.getElementById("join-name").value.trim();
       const errorEl = document.getElementById("start-error");
       errorEl.textContent = "";
       if (!name) {
@@ -187,21 +298,20 @@
           return;
         }
 
-        const existing = state.players.find((p) => p.id === guestId);
+        const existing = state.players.find((p) => p.id === myPlayerId);
         if (!existing) {
           if (state.players.length >= 6) {
             errorEl.textContent = "Die Partie ist bereits voll (max. 6 Spieler:innen).";
             return;
           }
-          state.players.push({ id: guestId, name, ...createEmptyPlayerScore(variantId) });
+          state.players.push({ id: myPlayerId, userId: identity.isLoggedIn ? identity.userId : null, name, ...createEmptyPlayerScore(variantId) });
           state.log.push(`${name} ist der Partie beigetreten.`);
           await saveState();
         }
 
-        myPlayerId = guestId;
-        isHost = state.hostId === guestId;
+        isHost = state.hostId === myPlayerId;
         subscribeToSession();
-        showLobby();
+        enterSession();
       } catch (err) {
         errorEl.textContent = err.message || "Beitritt fehlgeschlagen.";
       }
@@ -225,6 +335,38 @@
       });
     }
 
+    function buildHistoryPlayers() {
+      return state.players.map((p) => {
+        const totals = computeTotal(variantId, p.scores, p.bonusKniffelCount);
+        return { name: p.name, userId: p.userId || null, total: totals.total, scores: p.scores };
+      });
+    }
+
+    async function writeHistory(status) {
+      const historyPlayers = buildHistoryPlayers();
+      const maxTotal = Math.max(...historyPlayers.map((p) => p.total));
+      const winners = historyPlayers.filter((p) => p.total === maxTotal).map((p) => p.name);
+      const participantUserIds = state.players.filter((p) => p.userId).map((p) => p.userId);
+
+      try {
+        await tablesDB.createRow({
+          databaseId: DATABASE_ID,
+          tableId: HISTORY_TABLE_ID,
+          rowId: Appwrite.ID.unique(),
+          data: {
+            variant: variantId,
+            status,
+            players: JSON.stringify(historyPlayers),
+            participantUserIds,
+            endedAt: new Date().toISOString(),
+            winnerName: status === "finished" ? winners.join(", ") : null,
+          },
+        });
+      } catch (err) {
+        // Verlaufseintrag ist ein Zusatz - ein Fehler hier soll das laufende Spiel nicht blockieren.
+      }
+    }
+
     function subscribeToSession() {
       const channel = `databases.${DATABASE_ID}.tables.${TABLE_ID}.rows.${sessionRow.$id}`;
       unsubscribe = client.subscribe(channel, (event) => {
@@ -235,19 +377,13 @@
       });
     }
 
-    // --- UI-Flow ---
-    if (joinCode) {
-      document.getElementById("start-title").textContent = "Partie beitreten";
-      document.getElementById("create-block").classList.add("hidden");
-      document.getElementById("join-block").classList.remove("hidden");
-    }
-
     document.getElementById("create-btn").addEventListener("click", createSession);
     document.getElementById("join-btn").addEventListener("click", joinSession);
     document.getElementById("host-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createSession(); });
     document.getElementById("join-name").addEventListener("keydown", (e) => { if (e.key === "Enter") joinSession(); });
 
     function showLobby() {
+      document.getElementById("resume-card").classList.add("hidden");
       document.getElementById("start-card").classList.add("hidden");
       document.getElementById("lobby-card").classList.remove("hidden");
       render();
@@ -278,6 +414,32 @@
       await setStatus("playing");
     });
 
+    async function deleteSession() {
+      if (!isHost) return;
+      if (!confirm("Partie wirklich unwiderruflich löschen?")) return;
+      try {
+        await tablesDB.deleteRow({ databaseId: DATABASE_ID, tableId: TABLE_ID, rowId: sessionRow.$id });
+      } catch (err) {
+        if (err.code === 404) {
+          // Zeile bereits gelöscht (z.B. durch einen anderen Client) - trotzdem zurück zur Auswahl.
+        } else {
+          alert("Löschen fehlgeschlagen: " + (err.message || "Unbekannter Fehler"));
+          return;
+        }
+      }
+      window.location.href = "/kniffel/";
+    }
+
+    document.getElementById("delete-lobby-btn").addEventListener("click", deleteSession);
+    document.getElementById("delete-game-btn").addEventListener("click", deleteSession);
+
+    document.getElementById("end-game-btn").addEventListener("click", async () => {
+      if (!isHost) return;
+      if (!confirm("Partie vorzeitig beenden? Der aktuelle Punktestand wird im Verlauf gespeichert, es gibt keinen Gewinner.")) return;
+      await writeHistory("cancelled");
+      await setStatus("cancelled");
+    });
+
     // --- Spielrunde ---
     const diceTray = document.getElementById("dice-tray");
     const rollBtn = document.getElementById("roll-btn");
@@ -290,7 +452,6 @@
     }
 
     let lastRolledMask = null;
-    let lastFilled = null;
 
     rollBtn.addEventListener("click", async () => {
       if (!isMyTurn()) return;
@@ -333,6 +494,7 @@
       if (isJoker) player.bonusKniffelCount++;
 
       if (isGameFinished(variantId, state.players)) {
+        await writeHistory("finished");
         await setStatus("finished");
         return;
       }
@@ -356,13 +518,14 @@
           `<div class="lobby-player"><span>${escapeHtml(p.name)}</span>${p.id === state.hostId ? '<span class="badge">Host</span>' : ""}</div>`
         ).join("");
         document.getElementById("start-online-game-btn").classList.toggle("hidden", !isHost);
+        document.getElementById("delete-lobby-btn").classList.toggle("hidden", !isHost);
         return;
       }
 
       document.getElementById("start-card").classList.add("hidden");
       document.getElementById("lobby-card").classList.add("hidden");
 
-      if (sessionRow.status === "finished") {
+      if (sessionRow.status === "finished" || sessionRow.status === "cancelled") {
         document.getElementById("game-card").classList.add("hidden");
         showFinished();
         return;
@@ -370,6 +533,7 @@
 
       document.getElementById("game-card").classList.remove("hidden");
       document.getElementById("finished-card").classList.add("hidden");
+      document.getElementById("host-controls").classList.toggle("hidden", !isHost);
 
       const activePlayer = state.players[state.activePlayerIndex];
       document.getElementById("turn-player-name").textContent = activePlayer.name;
@@ -411,12 +575,19 @@
     function showFinished() {
       const finishedCard = document.getElementById("finished-card");
       finishedCard.classList.remove("hidden");
+      document.getElementById("history-link-btn").classList.toggle("hidden", !identity.isLoggedIn);
 
-      const totals = state.players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
-      const maxTotal = Math.max(...totals);
-      const winners = state.players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
-      document.getElementById("winner-banner").textContent =
-        winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+      if (sessionRow.status === "cancelled") {
+        document.getElementById("winner-banner").textContent = "Partie wurde vorzeitig beendet.";
+        document.getElementById("winner-banner").classList.remove("winner-banner");
+        document.getElementById("winner-banner").classList.add("cancelled-banner");
+      } else {
+        const totals = state.players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
+        const maxTotal = Math.max(...totals);
+        const winners = state.players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
+        document.getElementById("winner-banner").textContent =
+          winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+      }
 
       renderScorecard(document.getElementById("final-scorecard"), variantId, state.players, -1, null, null);
     }
@@ -430,6 +601,8 @@
     window.addEventListener("beforeunload", () => {
       if (unsubscribe) unsubscribe();
     });
+
+    init();
   </script>
 </body>
 </html>
