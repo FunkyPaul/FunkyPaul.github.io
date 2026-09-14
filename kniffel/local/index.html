@@ -22,6 +22,13 @@
         <input type="text" id="player-name-input" placeholder="Name eingeben..." maxlength="20" />
         <button type="button" id="add-player-btn">Hinzufügen</button>
       </div>
+      <div class="bot-setup-row">
+        <select id="bot-difficulty-select">
+          <option value="intermediate">Intermediate</option>
+          <option value="profi">Profi</option>
+        </select>
+        <button type="button" class="secondary" id="add-bot-btn">🤖 Bot hinzufügen</button>
+      </div>
       <div class="player-list" id="player-list"></div>
       <div id="my-player-field" class="hidden">
         <label for="my-player-select">Welche Spalte bist du? (für deinen Verlauf)</label>
@@ -77,6 +84,7 @@
   <script src="/assets/js/auth.js"></script>
   <script src="/assets/js/kniffel-account-menu.js"></script>
   <script src="/assets/js/kniffel-engine.js"></script>
+  <script src="/assets/js/kniffel-bot.js"></script>
   <script src="/assets/js/kniffel-ui.js"></script>
   <script src="/assets/js/kniffel-history.js"></script>
   <script>
@@ -104,25 +112,29 @@
     const nameInput = document.getElementById("player-name-input");
     const setupError = document.getElementById("setup-error");
     const myPlayerSelect = document.getElementById("my-player-select");
-    let setupNames = [];
+    const botDifficultySelect = document.getElementById("bot-difficulty-select");
+    let setupPlayers = []; // { name, isBot, botDifficulty }
+    let botCount = 0;
 
     function renderPlayerList() {
-      playerListEl.innerHTML = setupNames.map((name, i) =>
-        `<span class="player-chip">${escapeHtml(name)} <button type="button" data-index="${i}">✕</button></span>`
-      ).join("");
+      playerListEl.innerHTML = setupPlayers.map((p, i) => {
+        const botTag = p.isBot ? ` <span class="badge">${BOT_DIFFICULTIES[p.botDifficulty].label}</span>` : "";
+        return `<span class="player-chip">${p.isBot ? "🤖 " : ""}${escapeHtml(p.name)}${botTag} <button type="button" data-index="${i}">✕</button></span>`;
+      }).join("");
       playerListEl.querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", () => {
-          setupNames.splice(parseInt(btn.dataset.index, 10), 1);
+          setupPlayers.splice(parseInt(btn.dataset.index, 10), 1);
           renderPlayerList();
         });
       });
 
       if (currentUserId) {
         const previousValue = myPlayerSelect.value;
+        const humanPlayers = setupPlayers.map((p, i) => ({ ...p, originalIndex: i })).filter((p) => !p.isBot);
         myPlayerSelect.innerHTML =
           '<option value="">Keiner (nicht mitzählen)</option>' +
-          setupNames.map((name, i) => `<option value="${i}">${escapeHtml(name)}</option>`).join("");
-        if (previousValue && setupNames[previousValue] !== undefined) myPlayerSelect.value = previousValue;
+          humanPlayers.map((p) => `<option value="${p.originalIndex}">${escapeHtml(p.name)}</option>`).join("");
+        if (previousValue && setupPlayers[previousValue] !== undefined) myPlayerSelect.value = previousValue;
       }
     }
 
@@ -130,17 +142,31 @@
       const name = nameInput.value.trim();
       setupError.textContent = "";
       if (!name) return;
-      if (setupNames.length >= 6) {
+      if (setupPlayers.length >= 6) {
         setupError.textContent = "Maximal 6 Spieler:innen erlaubt.";
         return;
       }
-      setupNames.push(name);
+      setupPlayers.push({ name, isBot: false });
       nameInput.value = "";
       nameInput.focus();
       renderPlayerList();
     }
 
+    function addBot() {
+      setupError.textContent = "";
+      if (setupPlayers.length >= 6) {
+        setupError.textContent = "Maximal 6 Spieler:innen erlaubt.";
+        return;
+      }
+      botCount++;
+      const difficulty = botDifficultySelect.value;
+      const name = `Bot ${botCount} (${BOT_DIFFICULTIES[difficulty].label})`;
+      setupPlayers.push({ name, isBot: true, botDifficulty: difficulty });
+      renderPlayerList();
+    }
+
     document.getElementById("add-player-btn").addEventListener("click", addPlayer);
+    document.getElementById("add-bot-btn").addEventListener("click", addBot);
     nameInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -150,14 +176,16 @@
 
     document.getElementById("start-game-btn").addEventListener("click", () => {
       setupError.textContent = "";
-      if (setupNames.length < 2) {
+      if (setupPlayers.length < 2) {
         setupError.textContent = "Mindestens 2 Spieler:innen nötig.";
         return;
       }
       const myIndex = currentUserId && myPlayerSelect.value !== "" ? parseInt(myPlayerSelect.value, 10) : -1;
-      players = setupNames.map((name, i) => ({
-        name,
+      players = setupPlayers.map((p, i) => ({
+        name: p.name,
         userId: i === myIndex ? currentUserId : null,
+        isBot: p.isBot || false,
+        botDifficulty: p.botDifficulty || null,
         ...createEmptyPlayerScore(variantId),
       }));
       document.getElementById("setup-card").classList.add("hidden");
@@ -183,22 +211,68 @@
       lastRolledMask = null;
       lastFilled = null;
       updateTurnUI();
+
+      if (players[activePlayerIndex].isBot) {
+        setTimeout(playBotTurn, 500);
+      }
+    }
+
+    const BOT_TURN_PAUSE = 650;
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    async function playBotTurn() {
+      const player = players[activePlayerIndex];
+
+      while (rollNumber < config.maxRolls) {
+        if (rollNumber > 0) {
+          const rollsRemaining = config.maxRolls - rollNumber;
+          heldMask = decideBotHold(variantId, diceValues, player, rollsRemaining);
+          renderDice(diceTray, config, diceValues, heldMask, null, true);
+          await wait(BOT_TURN_PAUSE);
+        }
+        lastRolledMask = config.dice.map((_, i) => !heldMask[i]);
+        diceValues = rollDice(variantId, heldMask, diceValues);
+        rollNumber++;
+        heldMask = rollNumber === config.maxRolls ? heldMask : config.dice.map(() => false);
+        updateTurnUI();
+        await wait(BOT_TURN_PAUSE);
+      }
+
+      if (config.useChips && decideBotUseChip(variantId, diceValues, player) && player.chips > 0) {
+        player.chips--;
+        usedChipThisTurn = true;
+        updateTurnUI();
+        await wait(BOT_TURN_PAUSE * 0.6);
+        heldMask = decideBotHold(variantId, diceValues, player, 1);
+        renderDice(diceTray, config, diceValues, heldMask, null, true);
+        await wait(BOT_TURN_PAUSE);
+        lastRolledMask = config.dice.map((_, i) => !heldMask[i]);
+        diceValues = rollDice(variantId, heldMask, diceValues);
+        updateTurnUI();
+        await wait(BOT_TURN_PAUSE);
+      }
+
+      const choice = decideBotCategory(variantId, diceValues, player);
+      if (!choice) return;
+      handleCellClick(choice.categoryId, activePlayerIndex);
     }
 
     function updateTurnUI() {
-      document.getElementById("turn-player-name").textContent = players[activePlayerIndex].name;
+      const activePlayer = players[activePlayerIndex];
+      document.getElementById("turn-player-name").textContent = activePlayer.name;
       const hasRolled = rollNumber > 0;
-      renderDice(diceTray, config, diceValues, heldMask, hasRolled ? toggleHold : null, !hasRolled, lastRolledMask);
+      const isBotTurn = !!activePlayer.isBot;
+      renderDice(diceTray, config, diceValues, heldMask, hasRolled && !isBotTurn ? toggleHold : null, !hasRolled || isBotTurn, lastRolledMask);
 
       const maxReached = rollNumber >= config.maxRolls && !usedChipThisTurn;
-      rollBtn.disabled = rollNumber >= config.maxRolls + (usedChipThisTurn ? 1 : 0);
+      rollBtn.disabled = isBotTurn || rollNumber >= config.maxRolls + (usedChipThisTurn ? 1 : 0);
       rollBtn.textContent = rollNumber === 0 ? "Würfeln" : "Nochmal würfeln";
 
       if (config.useChips) {
         const player = players[activePlayerIndex];
         chipRow.classList.remove("hidden");
         chipRow.textContent = `Chips: ${player.chips}`;
-        useChipBtn.classList.toggle("hidden", !(maxReached && player.chips > 0 && !usedChipThisTurn));
+        useChipBtn.classList.toggle("hidden", isBotTurn || !(maxReached && player.chips > 0 && !usedChipThisTurn));
       } else {
         chipRow.classList.add("hidden");
         useChipBtn.classList.add("hidden");
@@ -234,12 +308,15 @@
 
     function renderScoreboard() {
       const hasRolled = rollNumber > 0;
+      const isBotTurn = !!players[activePlayerIndex].isBot;
       const filledIds = config.categories.filter((c) => players[activePlayerIndex].scores[c.id] !== null).map((c) => c.id);
       const preview = hasRolled ? computeAllScores(variantId, diceValues, filledIds) : null;
-      renderScorecard(document.getElementById("scorecard"), variantId, players, activePlayerIndex, preview, hasRolled ? handleCellClick : null, lastFilled);
-      document.getElementById("score-hint").textContent = hasRolled
-        ? "Klicke auf ein hervorgehobenes Feld, um deinen Wurf einzutragen."
-        : "Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.";
+      renderScorecard(document.getElementById("scorecard"), variantId, players, activePlayerIndex, preview, hasRolled && !isBotTurn ? handleCellClick : null, lastFilled);
+      document.getElementById("score-hint").textContent = isBotTurn
+        ? "🤖 Bot ist am Zug..."
+        : hasRolled
+          ? "Klicke auf ein hervorgehobenes Feld, um deinen Wurf einzutragen."
+          : "Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.";
     }
 
     function handleCellClick(categoryId, playerIndex) {

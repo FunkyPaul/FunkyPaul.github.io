@@ -60,6 +60,13 @@
         <button type="button" class="secondary" id="copy-link-btn">Link kopieren</button>
       </div>
       <div class="lobby-players" id="lobby-players"></div>
+      <div class="bot-setup-row hidden" id="lobby-bot-row">
+        <select id="lobby-bot-difficulty">
+          <option value="intermediate">Intermediate</option>
+          <option value="profi">Profi</option>
+        </select>
+        <button type="button" class="secondary" id="lobby-add-bot-btn">🤖 Bot hinzufügen</button>
+      </div>
       <div class="error-msg" id="lobby-error"></div>
       <div class="btn-row">
         <button type="button" id="start-online-game-btn">Spiel starten</button>
@@ -116,6 +123,7 @@
   <script src="/assets/js/kniffel-identity.js"></script>
   <script src="/assets/js/kniffel-account-menu.js"></script>
   <script src="/assets/js/kniffel-engine.js"></script>
+  <script src="/assets/js/kniffel-bot.js"></script>
   <script src="/assets/js/kniffel-ui.js"></script>
   <script src="/assets/js/kniffel-history.js"></script>
   <script>
@@ -396,6 +404,23 @@
     document.getElementById("delete-lobby-btn").addEventListener("click", deleteSession);
     document.getElementById("delete-game-btn").addEventListener("click", deleteSession);
 
+    document.getElementById("lobby-add-bot-btn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("lobby-error");
+      errorEl.textContent = "";
+      if (!isHost) return;
+      if (state.players.length >= 6) {
+        errorEl.textContent = "Die Partie ist bereits voll (max. 6 Spieler:innen).";
+        return;
+      }
+      const difficulty = document.getElementById("lobby-bot-difficulty").value;
+      const botNumber = state.players.filter((p) => p.isBot).length + 1;
+      const name = `Bot ${botNumber} (${BOT_DIFFICULTIES[difficulty].label})`;
+      const bot = { id: "bot_" + Appwrite.ID.unique(), userId: null, name, isBot: true, botDifficulty: difficulty, ...createEmptyPlayerScore(variantId) };
+      state.players.push(bot);
+      state.log.push(`${name} wurde hinzugefügt.`);
+      await saveState();
+    });
+
     document.getElementById("end-game-btn").addEventListener("click", async () => {
       if (!isHost) return;
       if (!confirm("Partie vorzeitig beenden? Der aktuelle Punktestand wird im Verlauf gespeichert, es gibt keinen Gewinner.")) return;
@@ -444,6 +469,13 @@
       if (!isMyTurn()) return;
       if (playerIndex !== state.activePlayerIndex) return;
       if (state.rollNumber === 0) return;
+      await fillCategoryAndAdvance(categoryId);
+    }
+
+    // Trägt die gewählte Kategorie für die aktuell aktive Person ein, protokolliert
+    // den Zug und schaltet zur nächsten Person weiter (oder beendet das Spiel).
+    // Gemeinsam genutzt von echten Spielzügen (handleCellClick) und Bot-Zügen.
+    async function fillCategoryAndAdvance(categoryId) {
       const player = state.players[state.activePlayerIndex];
       if (player.scores[categoryId] !== null) return;
 
@@ -470,6 +502,68 @@
       await saveState();
     }
 
+    // --- Bot-Züge (nur der Host treibt Bots an, damit kein Zug doppelt/gleichzeitig
+    // von mehreren Clients ausgeführt wird) ---
+    let botTurnInProgress = false;
+    const BOT_TURN_PAUSE = 750;
+    const botWait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    function maybeStartBotTurn(activePlayer) {
+      if (!isHost) return;
+      if (!activePlayer.isBot) return;
+      if (botTurnInProgress) return;
+      botTurnInProgress = true;
+      playBotTurnOnline().finally(() => {
+        botTurnInProgress = false;
+      });
+    }
+
+    async function playBotTurnOnline() {
+      // Zustand kann sich seit dem letzten render() durch Realtime-Events geändert
+      // haben - vor jedem Schritt erneut prüfen, dass der Bot noch aktiv ist und die
+      // Partie noch läuft. isGameFinished statt sessionRow.status, da letzteres erst
+      // per Realtime-Echo aktualisiert wird und kurzzeitig veraltet sein kann.
+      while (
+        state.players[state.activePlayerIndex] &&
+        state.players[state.activePlayerIndex].isBot &&
+        !isGameFinished(variantId, state.players)
+      ) {
+        const player = state.players[state.activePlayerIndex];
+
+        while (state.rollNumber < config.maxRolls) {
+          if (state.rollNumber > 0) {
+            const rollsRemaining = config.maxRolls - state.rollNumber;
+            state.heldMask = decideBotHold(variantId, state.diceValues, player, rollsRemaining);
+            await saveState();
+            await botWait(BOT_TURN_PAUSE);
+          }
+          state.diceValues = rollDice(variantId, state.heldMask, state.diceValues);
+          state.rollNumber++;
+          state.heldMask = state.rollNumber === config.maxRolls ? state.heldMask : config.dice.map(() => false);
+          await saveState();
+          await botWait(BOT_TURN_PAUSE);
+        }
+
+        if (config.useChips && decideBotUseChip(variantId, state.diceValues, player) && player.chips > 0) {
+          player.chips--;
+          state.usedChipThisTurn = true;
+          await saveState();
+          await botWait(BOT_TURN_PAUSE * 0.6);
+          state.heldMask = decideBotHold(variantId, state.diceValues, player, 1);
+          await saveState();
+          await botWait(BOT_TURN_PAUSE);
+          state.diceValues = rollDice(variantId, state.heldMask, state.diceValues);
+          await saveState();
+          await botWait(BOT_TURN_PAUSE);
+        }
+
+        const choice = decideBotCategory(variantId, state.diceValues, player);
+        if (!choice) return;
+        await fillCategoryAndAdvance(choice.categoryId);
+        await botWait(300);
+      }
+    }
+
     // --- Rendering ---
     function render() {
       if (!state || !sessionRow) return;
@@ -478,10 +572,11 @@
         document.getElementById("join-link").textContent = `${window.location.origin}/kniffel/play/?variant=${variantId}&code=${sessionRow.code}`;
         const list = document.getElementById("lobby-players");
         list.innerHTML = state.players.map((p) =>
-          `<div class="lobby-player"><span>${escapeHtml(p.name)}</span>${p.id === state.hostId ? '<span class="badge">Host</span>' : ""}</div>`
+          `<div class="lobby-player"><span>${p.isBot ? "🤖 " : ""}${escapeHtml(p.name)}</span>${p.id === state.hostId ? '<span class="badge">Host</span>' : ""}</div>`
         ).join("");
         document.getElementById("start-online-game-btn").classList.toggle("hidden", !isHost);
         document.getElementById("delete-lobby-btn").classList.toggle("hidden", !isHost);
+        document.getElementById("lobby-bot-row").classList.toggle("hidden", !isHost);
         return;
       }
 
@@ -501,9 +596,12 @@
       const activePlayer = state.players[state.activePlayerIndex];
       document.getElementById("turn-player-name").textContent = activePlayer.name;
 
+      maybeStartBotTurn(activePlayer);
+
       const myTurn = isMyTurn();
       const hasRolled = state.rollNumber > 0;
-      renderDice(diceTray, config, state.diceValues, state.heldMask, myTurn && hasRolled ? toggleHold : null, !(myTurn && hasRolled), lastRolledMask);
+      const isBotTurn = !!activePlayer.isBot;
+      renderDice(diceTray, config, state.diceValues, state.heldMask, myTurn && hasRolled && !isBotTurn ? toggleHold : null, !(myTurn && hasRolled) || isBotTurn, lastRolledMask);
       lastRolledMask = null;
 
       rollBtn.disabled = !myTurn || state.rollNumber >= config.maxRolls + (state.usedChipThisTurn ? 1 : 0);

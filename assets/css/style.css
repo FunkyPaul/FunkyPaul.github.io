@@ -728,6 +728,22 @@ button.danger:hover {
   flex: 1;
 }
 
+.bot-setup-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.bot-setup-row select {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.bot-setup-row button {
+  flex: 1;
+}
+
 .player-list {
   margin-top: 16px;
   display: flex;
