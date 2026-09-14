@@ -52,7 +52,7 @@
     const errorMsg = document.getElementById("error-msg");
 
     const params = new URLSearchParams(window.location.search);
-    const redirectAfterLogin = params.get("redirect") || "/debts/";
+    const redirectAfterLogin = params.get("redirect") || "/";
 
     // Falls bereits eingeloggt, direkt weiterleiten
     getCurrentUser().then((user) => {
