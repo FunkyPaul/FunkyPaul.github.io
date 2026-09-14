@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spielmodus – Kniffel</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="top">
+      <h1 id="page-title">Kniffel</h1>
+      <a href="/kniffel/"><button class="secondary">Zurück</button></a>
+    </header>
+
+    <div class="card">
+      <h3 style="margin-top:0">Wie möchtet ihr spielen?</h3>
+      <div class="mode-select">
+        <a class="game-tile" id="local-link" href="#">
+          <h3>Lokal (ein Gerät)</h3>
+          <p>Bis zu 6 Spieler:innen reichen sich ein Gerät weiter.</p>
+        </a>
+        <a class="game-tile" id="online-link" href="#">
+          <h3>Online (mehrere Geräte)</h3>
+          <p>Eine Partie erstellen und andere per Link einladen.</p>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const variant = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
+    const variantName = variant === "kniffel_extreme" ? "Kniffel Extreme" : "Kniffel";
+
+    document.getElementById("page-title").textContent = variantName;
+    document.getElementById("local-link").href = `/kniffel/local/?variant=${variant}`;
+    document.getElementById("online-link").href = `/kniffel/play/?variant=${variant}`;
+  </script>
+</body>
+</html>

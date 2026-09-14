@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kniffel online – paulfunke.me</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page page-wide">
+    <header class="top">
+      <h1 id="page-title">Kniffel online</h1>
+      <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+    </header>
+
+    <!-- Schritt 1: Erstellen oder Beitreten -->
+    <div id="start-card" class="card">
+      <h3 style="margin-top:0" id="start-title">Neue Online-Partie</h3>
+      <div id="create-block">
+        <label for="host-name">Dein Name</label>
+        <input type="text" id="host-name" maxlength="20" placeholder="Name eingeben..." />
+        <div class="btn-row">
+          <button type="button" id="create-btn">Partie erstellen</button>
+        </div>
+      </div>
+      <div id="join-block" class="hidden">
+        <p class="roll-count">Du wurdest zu einer Partie eingeladen.</p>
+        <label for="join-name">Dein Name</label>
+        <input type="text" id="join-name" maxlength="20" placeholder="Name eingeben..." />
+        <div class="btn-row">
+          <button type="button" id="join-btn">Beitreten</button>
+        </div>
+      </div>
+      <div class="error-msg" id="start-error"></div>
+    </div>
+
+    <!-- Schritt 2: Lobby -->
+    <div id="lobby-card" class="card hidden">
+      <h3 style="margin-top:0">Lobby</h3>
+      <p>Lade Mitspieler:innen mit diesem Link ein:</p>
+      <div class="join-code" id="join-link"></div>
+      <div class="btn-row">
+        <button type="button" class="secondary" id="copy-link-btn">Link kopieren</button>
+      </div>
+      <div class="lobby-players" id="lobby-players"></div>
+      <div class="error-msg" id="lobby-error"></div>
+      <div class="btn-row">
+        <button type="button" id="start-online-game-btn">Spiel starten</button>
+      </div>
+      <p class="roll-count">Mindestens 2, maximal 6 Spieler:innen. Nur die Person, die die Partie erstellt hat, kann starten.</p>
+    </div>
+
+    <!-- Schritt 3: Spiel -->
+    <div id="game-card" class="hidden">
+      <div class="card">
+        <div class="turn-banner">
+          <span class="player-name" id="turn-player-name"></span> ist an der Reihe
+        </div>
+        <div class="dice-tray" id="dice-tray"></div>
+        <div class="roll-controls">
+          <button type="button" id="roll-btn">Würfeln</button>
+          <button type="button" class="secondary" id="use-chip-btn">Chip einsetzen (4. Wurf)</button>
+        </div>
+        <div class="roll-count" id="roll-count"></div>
+        <div class="chip-row hidden" id="chip-row"></div>
+        <div class="game-log" id="game-log"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">Punktetafel</h3>
+        <p class="roll-count" id="score-hint"></p>
+        <div class="score-table-wrap" id="scorecard"></div>
+      </div>
+    </div>
+
+    <div id="finished-card" class="card hidden">
+      <div class="winner-banner" id="winner-banner"></div>
+      <div class="score-table-wrap" id="final-scorecard"></div>
+      <div class="btn-row">
+        <a href="/kniffel/"><button class="secondary">Zurück zur Auswahl</button></a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@27.0.0"></script>
+  <script src="/assets/js/appwrite-config.js"></script>
+  <script src="/assets/js/kniffel-engine.js"></script>
+  <script src="/assets/js/kniffel-ui.js"></script>
+  <script>
+    const DATABASE_ID = "main";
+    const TABLE_ID = "game_sessions";
+
+    const params = new URLSearchParams(window.location.search);
+    const variantId = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
+    const config = KNIFFEL_VARIANTS[variantId];
+    const joinCode = params.get("code");
+
+    document.getElementById("page-title").textContent = config.name + " online";
+
+    // Jeder Client (Gast ohne Account) bekommt eine stabile lokale ID.
+    function getGuestId() {
+      let id = localStorage.getItem("kniffel_guest_id");
+      if (!id) {
+        id = "g_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem("kniffel_guest_id", id);
+      }
+      return id;
+    }
+    const guestId = getGuestId();
+
+    let sessionRow = null; // Appwrite-Row
+    let state = null; // geparster JSON-Zustand
+    let unsubscribe = null;
+    let isHost = false;
+    let myPlayerId = null;
+
+    function generateCode() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      return code;
+    }
+
+    async function createSession() {
+      const name = document.getElementById("host-name").value.trim();
+      const errorEl = document.getElementById("start-error");
+      errorEl.textContent = "";
+      if (!name) {
+        errorEl.textContent = "Bitte gib deinen Namen ein.";
+        return;
+      }
+
+      myPlayerId = guestId;
+      isHost = true;
+      const code = generateCode();
+      const initialState = {
+        players: [{ id: myPlayerId, name, ...createEmptyPlayerScore(variantId) }],
+        hostId: myPlayerId,
+        activePlayerIndex: 0,
+        rollNumber: 0,
+        diceValues: config.dice.map(() => null),
+        heldMask: config.dice.map(() => false),
+        usedChipThisTurn: false,
+        log: [`${name} hat die Partie erstellt.`],
+      };
+
+      try {
+        sessionRow = await tablesDB.createRow({
+          databaseId: DATABASE_ID,
+          tableId: TABLE_ID,
+          rowId: Appwrite.ID.unique(),
+          data: { code, variant: variantId, status: "lobby", state: JSON.stringify(initialState) },
+        });
+        state = initialState;
+        history.replaceState(null, "", `/kniffel/play/?variant=${variantId}&code=${code}`);
+        subscribeToSession();
+        showLobby();
+      } catch (err) {
+        errorEl.textContent = err.message || "Partie konnte nicht erstellt werden.";
+      }
+    }
+
+    async function joinSession() {
+      const name = document.getElementById("join-name").value.trim();
+      const errorEl = document.getElementById("start-error");
+      errorEl.textContent = "";
+      if (!name) {
+        errorEl.textContent = "Bitte gib deinen Namen ein.";
+        return;
+      }
+
+      try {
+        const res = await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: TABLE_ID,
+          queries: [Appwrite.Query.equal("code", joinCode), Appwrite.Query.limit(1)],
+        });
+        if (res.rows.length === 0) {
+          errorEl.textContent = "Partie nicht gefunden. Prüfe den Link.";
+          return;
+        }
+        sessionRow = res.rows[0];
+        state = JSON.parse(sessionRow.state);
+
+        if (sessionRow.status !== "lobby") {
+          errorEl.textContent = "Diese Partie läuft bereits oder ist beendet.";
+          return;
+        }
+
+        const existing = state.players.find((p) => p.id === guestId);
+        if (!existing) {
+          if (state.players.length >= 6) {
+            errorEl.textContent = "Die Partie ist bereits voll (max. 6 Spieler:innen).";
+            return;
+          }
+          state.players.push({ id: guestId, name, ...createEmptyPlayerScore(variantId) });
+          state.log.push(`${name} ist der Partie beigetreten.`);
+          await saveState();
+        }
+
+        myPlayerId = guestId;
+        isHost = state.hostId === guestId;
+        subscribeToSession();
+        showLobby();
+      } catch (err) {
+        errorEl.textContent = err.message || "Beitritt fehlgeschlagen.";
+      }
+    }
+
+    async function saveState() {
+      await tablesDB.updateRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        rowId: sessionRow.$id,
+        data: { state: JSON.stringify(state) },
+      });
+    }
+
+    async function setStatus(status) {
+      await tablesDB.updateRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLE_ID,
+        rowId: sessionRow.$id,
+        data: { status, state: JSON.stringify(state) },
+      });
+    }
+
+    function subscribeToSession() {
+      const channel = `databases.${DATABASE_ID}.tables.${TABLE_ID}.rows.${sessionRow.$id}`;
+      unsubscribe = client.subscribe(channel, (event) => {
+        if (!event.payload) return;
+        sessionRow = { ...sessionRow, ...event.payload };
+        state = JSON.parse(event.payload.state);
+        render();
+      });
+    }
+
+    // --- UI-Flow ---
+    if (joinCode) {
+      document.getElementById("start-title").textContent = "Partie beitreten";
+      document.getElementById("create-block").classList.add("hidden");
+      document.getElementById("join-block").classList.remove("hidden");
+    }
+
+    document.getElementById("create-btn").addEventListener("click", createSession);
+    document.getElementById("join-btn").addEventListener("click", joinSession);
+    document.getElementById("host-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createSession(); });
+    document.getElementById("join-name").addEventListener("keydown", (e) => { if (e.key === "Enter") joinSession(); });
+
+    function showLobby() {
+      document.getElementById("start-card").classList.add("hidden");
+      document.getElementById("lobby-card").classList.remove("hidden");
+      render();
+    }
+
+    document.getElementById("copy-link-btn").addEventListener("click", async () => {
+      const url = document.getElementById("join-link").textContent;
+      try {
+        await navigator.clipboard.writeText(url);
+        const btn = document.getElementById("copy-link-btn");
+        const original = btn.textContent;
+        btn.textContent = "Kopiert!";
+        setTimeout(() => (btn.textContent = original), 1500);
+      } catch (err) {
+        // Zwischenablage evtl. nicht verfügbar - Link ist sichtbar zum manuellen Kopieren.
+      }
+    });
+
+    document.getElementById("start-online-game-btn").addEventListener("click", async () => {
+      const errorEl = document.getElementById("lobby-error");
+      errorEl.textContent = "";
+      if (!isHost) return;
+      if (state.players.length < 2) {
+        errorEl.textContent = "Mindestens 2 Spieler:innen nötig.";
+        return;
+      }
+      state.log.push("Das Spiel beginnt.");
+      await setStatus("playing");
+    });
+
+    // --- Spielrunde ---
+    const diceTray = document.getElementById("dice-tray");
+    const rollBtn = document.getElementById("roll-btn");
+    const useChipBtn = document.getElementById("use-chip-btn");
+    const rollCountEl = document.getElementById("roll-count");
+    const chipRow = document.getElementById("chip-row");
+
+    function isMyTurn() {
+      return state && state.players[state.activePlayerIndex] && state.players[state.activePlayerIndex].id === myPlayerId;
+    }
+
+    rollBtn.addEventListener("click", async () => {
+      if (!isMyTurn()) return;
+      state.diceValues = rollDice(variantId, state.heldMask, state.diceValues);
+      state.rollNumber++;
+      state.heldMask = config.dice.map(() => false);
+      await saveState();
+    });
+
+    useChipBtn.addEventListener("click", async () => {
+      if (!isMyTurn()) return;
+      const player = state.players[state.activePlayerIndex];
+      if (player.chips <= 0) return;
+      player.chips--;
+      state.usedChipThisTurn = true;
+      await saveState();
+    });
+
+    function toggleHold(i) {
+      if (!isMyTurn()) return;
+      state.heldMask[i] = !state.heldMask[i];
+      saveState();
+    }
+
+    async function handleCellClick(categoryId, playerIndex) {
+      if (!isMyTurn()) return;
+      if (playerIndex !== state.activePlayerIndex) return;
+      if (state.rollNumber === 0) return;
+      const player = state.players[state.activePlayerIndex];
+      if (player.scores[categoryId] !== null) return;
+
+      const isJoker = config.extraKniffelBonus > 0 && categoryId !== "kniffel" &&
+        isKniffelRoll(variantId, state.diceValues) && player.scores.kniffel === 50;
+
+      const score = isJoker ? maxCategoryValue(variantId, categoryId) : scoreCategory(variantId, categoryId, state.diceValues);
+      player.scores[categoryId] = score;
+      state.log.push(`${player.name}: ${config.categories.find((c) => c.id === categoryId).name} = ${score} Punkte${isJoker ? " (Kniffel-Bonus)" : ""}`);
+
+      if (isJoker) player.bonusKniffelCount++;
+
+      if (isGameFinished(variantId, state.players)) {
+        await setStatus("finished");
+        return;
+      }
+
+      state.activePlayerIndex = (state.activePlayerIndex + 1) % state.players.length;
+      state.rollNumber = 0;
+      state.diceValues = config.dice.map(() => null);
+      state.heldMask = config.dice.map(() => false);
+      state.usedChipThisTurn = false;
+      await saveState();
+    }
+
+    // --- Rendering ---
+    function render() {
+      if (!state || !sessionRow) return;
+
+      if (sessionRow.status === "lobby") {
+        document.getElementById("join-link").textContent = `${window.location.origin}/kniffel/play/?variant=${variantId}&code=${sessionRow.code}`;
+        const list = document.getElementById("lobby-players");
+        list.innerHTML = state.players.map((p) =>
+          `<div class="lobby-player"><span>${escapeHtml(p.name)}</span>${p.id === state.hostId ? '<span class="badge">Host</span>' : ""}</div>`
+        ).join("");
+        document.getElementById("start-online-game-btn").classList.toggle("hidden", !isHost);
+        return;
+      }
+
+      document.getElementById("start-card").classList.add("hidden");
+      document.getElementById("lobby-card").classList.add("hidden");
+
+      if (sessionRow.status === "finished") {
+        document.getElementById("game-card").classList.add("hidden");
+        showFinished();
+        return;
+      }
+
+      document.getElementById("game-card").classList.remove("hidden");
+      document.getElementById("finished-card").classList.add("hidden");
+
+      const activePlayer = state.players[state.activePlayerIndex];
+      document.getElementById("turn-player-name").textContent = activePlayer.name;
+
+      const myTurn = isMyTurn();
+      const hasRolled = state.rollNumber > 0;
+      renderDice(diceTray, config, state.diceValues, state.heldMask, myTurn && hasRolled ? toggleHold : null, !(myTurn && hasRolled));
+
+      rollBtn.disabled = !myTurn || state.rollNumber >= config.maxRolls + (state.usedChipThisTurn ? 1 : 0);
+      rollBtn.textContent = state.rollNumber === 0 ? "Würfeln" : "Nochmal würfeln";
+
+      if (config.useChips) {
+        chipRow.classList.remove("hidden");
+        chipRow.textContent = `Chips (${activePlayer.name}): ${activePlayer.chips}`;
+        const maxReached = state.rollNumber >= config.maxRolls && !state.usedChipThisTurn;
+        useChipBtn.classList.toggle("hidden", !(myTurn && maxReached && activePlayer.chips > 0));
+      } else {
+        chipRow.classList.add("hidden");
+        useChipBtn.classList.add("hidden");
+      }
+
+      rollCountEl.textContent = myTurn
+        ? (state.rollNumber === 0 ? `Wurf 1 von ${config.maxRolls}` : `Wurf ${state.rollNumber} von ${config.maxRolls}${state.usedChipThisTurn ? " (+ Chip-Wurf)" : ""}`)
+        : "Warte, bis du an der Reihe bist...";
+
+      document.getElementById("score-hint").textContent = myTurn && hasRolled
+        ? "Klicke auf ein hervorgehobenes Feld, um deinen Wurf einzutragen."
+        : "";
+
+      const filledIds = config.categories.filter((c) => activePlayer.scores[c.id] !== null).map((c) => c.id);
+      const preview = myTurn && hasRolled ? computeAllScores(variantId, state.diceValues, filledIds) : null;
+      renderScorecard(document.getElementById("scorecard"), variantId, state.players, state.activePlayerIndex, preview, myTurn && hasRolled ? handleCellClick : null);
+
+      const logEl = document.getElementById("game-log");
+      logEl.innerHTML = state.log.slice(-20).reverse().map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+    }
+
+    function showFinished() {
+      const finishedCard = document.getElementById("finished-card");
+      finishedCard.classList.remove("hidden");
+
+      const totals = state.players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
+      const maxTotal = Math.max(...totals);
+      const winners = state.players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
+      document.getElementById("winner-banner").textContent =
+        winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+
+      renderScorecard(document.getElementById("final-scorecard"), variantId, state.players, -1, null, null);
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str == null ? "" : String(str);
+      return div.innerHTML;
+    }
+
+    window.addEventListener("beforeunload", () => {
+      if (unsubscribe) unsubscribe();
+    });
+  </script>
+</body>
+</html>

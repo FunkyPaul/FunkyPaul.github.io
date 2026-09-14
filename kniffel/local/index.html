@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kniffel lokal – paulfunke.me</title>
+  <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+  <div class="page page-wide">
+    <header class="top">
+      <h1 id="page-title">Kniffel</h1>
+      <a href="/kniffel/"><button class="secondary">Verlassen</button></a>
+    </header>
+
+    <div id="setup-card" class="card">
+      <h3 style="margin-top:0">Spieler:innen (2–6)</h3>
+      <div class="player-setup-row">
+        <input type="text" id="player-name-input" placeholder="Name eingeben..." maxlength="20" />
+        <button type="button" id="add-player-btn">Hinzufügen</button>
+      </div>
+      <div class="player-list" id="player-list"></div>
+      <div class="error-msg" id="setup-error"></div>
+      <div class="btn-row">
+        <button type="button" id="start-game-btn">Spiel starten</button>
+      </div>
+    </div>
+
+    <div id="game-card" class="hidden">
+      <div class="card">
+        <div class="turn-banner">
+          <span class="player-name" id="turn-player-name"></span> ist an der Reihe
+        </div>
+        <div class="dice-tray" id="dice-tray"></div>
+        <div class="roll-controls">
+          <button type="button" id="roll-btn">Würfeln</button>
+          <button type="button" class="secondary" id="use-chip-btn">Chip einsetzen (4. Wurf)</button>
+        </div>
+        <div class="roll-count" id="roll-count"></div>
+        <div class="chip-row hidden" id="chip-row"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">Punktetafel</h3>
+        <p class="roll-count" id="score-hint">Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.</p>
+        <div class="score-table-wrap" id="scorecard"></div>
+      </div>
+    </div>
+
+    <div id="finished-card" class="card hidden">
+      <div class="winner-banner" id="winner-banner"></div>
+      <div class="score-table-wrap" id="final-scorecard"></div>
+      <div class="btn-row">
+        <a href="/kniffel/local/?variant=kniffel"><button class="secondary">Neues Spiel</button></a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/js/kniffel-engine.js"></script>
+  <script src="/assets/js/kniffel-ui.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const variantId = params.get("variant") === "kniffel_extreme" ? "kniffel_extreme" : "kniffel";
+    const config = KNIFFEL_VARIANTS[variantId];
+    document.getElementById("page-title").textContent = config.name + " (lokal)";
+
+    let players = []; // { name, scores, bonusKniffelCount, chips }
+    let activePlayerIndex = 0;
+    let rollNumber = 0; // 0 = noch nicht gewürfelt
+    let diceValues = config.dice.map(() => null);
+    let heldMask = config.dice.map(() => false);
+    let usedChipThisTurn = false;
+
+    // --- Setup ---
+    const playerListEl = document.getElementById("player-list");
+    const nameInput = document.getElementById("player-name-input");
+    const setupError = document.getElementById("setup-error");
+    let setupNames = [];
+
+    function renderPlayerList() {
+      playerListEl.innerHTML = setupNames.map((name, i) =>
+        `<span class="player-chip">${escapeHtml(name)} <button type="button" data-index="${i}">✕</button></span>`
+      ).join("");
+      playerListEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          setupNames.splice(parseInt(btn.dataset.index, 10), 1);
+          renderPlayerList();
+        });
+      });
+    }
+
+    function addPlayer() {
+      const name = nameInput.value.trim();
+      setupError.textContent = "";
+      if (!name) return;
+      if (setupNames.length >= 6) {
+        setupError.textContent = "Maximal 6 Spieler:innen erlaubt.";
+        return;
+      }
+      setupNames.push(name);
+      nameInput.value = "";
+      nameInput.focus();
+      renderPlayerList();
+    }
+
+    document.getElementById("add-player-btn").addEventListener("click", addPlayer);
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addPlayer();
+      }
+    });
+
+    document.getElementById("start-game-btn").addEventListener("click", () => {
+      setupError.textContent = "";
+      if (setupNames.length < 2) {
+        setupError.textContent = "Mindestens 2 Spieler:innen nötig.";
+        return;
+      }
+      players = setupNames.map((name) => ({ name, ...createEmptyPlayerScore(variantId) }));
+      document.getElementById("setup-card").classList.add("hidden");
+      document.getElementById("game-card").classList.remove("hidden");
+      startTurn();
+    });
+
+    // --- Spielrunde ---
+    const diceTray = document.getElementById("dice-tray");
+    const rollBtn = document.getElementById("roll-btn");
+    const useChipBtn = document.getElementById("use-chip-btn");
+    const rollCountEl = document.getElementById("roll-count");
+    const chipRow = document.getElementById("chip-row");
+
+    function startTurn() {
+      rollNumber = 0;
+      diceValues = config.dice.map(() => null);
+      heldMask = config.dice.map(() => false);
+      usedChipThisTurn = false;
+      updateTurnUI();
+    }
+
+    function updateTurnUI() {
+      document.getElementById("turn-player-name").textContent = players[activePlayerIndex].name;
+      const hasRolled = rollNumber > 0;
+      renderDice(diceTray, config, diceValues, heldMask, hasRolled ? toggleHold : null, !hasRolled);
+
+      const maxReached = rollNumber >= config.maxRolls && !usedChipThisTurn;
+      rollBtn.disabled = rollNumber >= config.maxRolls + (usedChipThisTurn ? 1 : 0);
+      rollBtn.textContent = rollNumber === 0 ? "Würfeln" : "Nochmal würfeln";
+
+      if (config.useChips) {
+        const player = players[activePlayerIndex];
+        chipRow.classList.remove("hidden");
+        chipRow.textContent = `Chips: ${player.chips}`;
+        useChipBtn.classList.toggle("hidden", !(maxReached && player.chips > 0 && !usedChipThisTurn));
+      } else {
+        chipRow.classList.add("hidden");
+        useChipBtn.classList.add("hidden");
+      }
+
+      rollCountEl.textContent = rollNumber === 0
+        ? `Wurf 1 von ${config.maxRolls}`
+        : `Wurf ${rollNumber} von ${config.maxRolls}${usedChipThisTurn ? " (+ Chip-Wurf)" : ""}`;
+
+      renderScoreboard();
+    }
+
+    function toggleHold(i) {
+      heldMask[i] = !heldMask[i];
+      renderDice(diceTray, config, diceValues, heldMask, toggleHold, false);
+    }
+
+    rollBtn.addEventListener("click", () => {
+      diceValues = rollDice(variantId, heldMask, diceValues);
+      rollNumber++;
+      heldMask = config.dice.map(() => false);
+      updateTurnUI();
+    });
+
+    useChipBtn.addEventListener("click", () => {
+      const player = players[activePlayerIndex];
+      if (player.chips <= 0) return;
+      player.chips--;
+      usedChipThisTurn = true;
+      updateTurnUI();
+    });
+
+    function renderScoreboard() {
+      const hasRolled = rollNumber > 0;
+      const filledIds = config.categories.filter((c) => players[activePlayerIndex].scores[c.id] !== null).map((c) => c.id);
+      const preview = hasRolled ? computeAllScores(variantId, diceValues, filledIds) : null;
+      renderScorecard(document.getElementById("scorecard"), variantId, players, activePlayerIndex, preview, hasRolled ? handleCellClick : null);
+      document.getElementById("score-hint").textContent = hasRolled
+        ? "Klicke auf ein hervorgehobenes Feld, um deinen Wurf einzutragen."
+        : "Würfle zuerst, dann klicke auf ein Feld, um es einzutragen.";
+    }
+
+    function handleCellClick(categoryId, playerIndex) {
+      if (playerIndex !== activePlayerIndex) return;
+      if (rollNumber === 0) return;
+      const player = players[activePlayerIndex];
+      if (player.scores[categoryId] !== null) return;
+
+      const isJoker = config.extraKniffelBonus > 0 && categoryId !== "kniffel" &&
+        isKniffelRoll(variantId, diceValues) && player.scores.kniffel === 50;
+
+      player.scores[categoryId] = isJoker ? maxCategoryValue(variantId, categoryId) : scoreCategory(variantId, categoryId, diceValues);
+      if (isJoker) player.bonusKniffelCount++;
+
+      advanceTurn();
+    }
+
+    function advanceTurn() {
+      if (isGameFinished(variantId, players)) {
+        showFinished();
+        return;
+      }
+      activePlayerIndex = (activePlayerIndex + 1) % players.length;
+      startTurn();
+    }
+
+    function showFinished() {
+      document.getElementById("game-card").classList.add("hidden");
+      const finishedCard = document.getElementById("finished-card");
+      finishedCard.classList.remove("hidden");
+
+      const totals = players.map((p) => computeTotal(variantId, p.scores, p.bonusKniffelCount).total);
+      const maxTotal = Math.max(...totals);
+      const winners = players.filter((_, i) => totals[i] === maxTotal).map((p) => p.name);
+      document.getElementById("winner-banner").textContent =
+        winners.length > 1 ? `Unentschieden: ${winners.join(", ")} (${maxTotal} Punkte)` : `${winners[0]} gewinnt mit ${maxTotal} Punkten!`;
+
+      renderScorecard(document.getElementById("final-scorecard"), variantId, players, -1, null, null);
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    renderPlayerList();
+  </script>
+</body>
+</html>
